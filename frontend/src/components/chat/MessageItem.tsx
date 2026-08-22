@@ -13,8 +13,10 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
 import { Message } from "@/types";
 import { StepContainer } from "../steps/StepContainer";
+import { CodeBlock } from "@/components/ui/CodeBlock";
 import { formatDate } from "@/lib/utils";
 
 interface MessageItemProps {
@@ -104,12 +106,76 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
             // 1. 正在流式执行中的任务：直接展示动态 Step 容器与 SSE 流
             <StepContainer taskId={taskId} isStreaming={true} />
           ) : (
-            // 2. 历史消息：展示最终正文回复 + 折叠懒加载步骤详情
+            // 2. 历史消息：Markdown 结构化渲染正文回复 + 折叠懒加载步骤详情
             <div className="space-y-3">
-              {/* 正文回复 */}
+              {/* 正文 Markdown 渲染 */}
               {message.content?.text ? (
-                <div className="text-sm leading-relaxed whitespace-pre-wrap text-slate-200">
-                  {message.content.text}
+                <div className="prose prose-invert prose-sm max-w-none text-slate-100 text-sm leading-relaxed font-sans">
+                  <ReactMarkdown
+                    components={{
+                      code({ className, children, ...props }) {
+                        const match = /language-(\w+)/.exec(className || "");
+                        const isInline = !match && !String(children).includes("\n");
+
+                        if (isInline) {
+                          return (
+                            <code
+                              className="px-1.5 py-0.5 rounded-md bg-slate-800 text-indigo-300 font-mono text-xs border border-slate-700"
+                              {...props}
+                            >
+                              {children}
+                            </code>
+                          );
+                        }
+
+                        return (
+                          <CodeBlock
+                            language={match ? match[1] : ""}
+                            value={String(children).replace(/\n$/, "")}
+                          />
+                        );
+                      },
+                      table({ children }) {
+                        return (
+                          <div className="my-3 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60">
+                            <table className="min-w-full divide-y divide-slate-800 text-xs text-left">
+                              {children}
+                            </table>
+                          </div>
+                        );
+                      },
+                      th({ children }) {
+                        return (
+                          <th className="px-3.5 py-2.5 bg-slate-900 font-semibold text-slate-200">
+                            {children}
+                          </th>
+                        );
+                      },
+                      td({ children }) {
+                        return (
+                          <td className="px-3.5 py-2 border-t border-slate-800/60 text-slate-300">
+                            {children}
+                          </td>
+                        );
+                      },
+                      a({ href, children, ...props }) {
+                        return (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 underline underline-offset-4 decoration-indigo-500/50 hover:decoration-indigo-400 transition-colors font-medium cursor-pointer"
+                            {...props}
+                          >
+                            <span>{children}</span>
+                            <span className="text-[10px] opacity-80">↗</span>
+                          </a>
+                        );
+                      },
+                    }}
+                  >
+                    {message.content.text}
+                  </ReactMarkdown>
                 </div>
               ) : null}
 
