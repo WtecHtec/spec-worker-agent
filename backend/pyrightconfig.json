@@ -1,0 +1,17 @@
+{
+  "pythonVersion": "3.11",
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": [
+    "."
+  ],
+  "include": [
+    "src",
+    "api_main.py",
+    "worker_main.py"
+  ],
+  "exclude": [
+    ".venv",
+    "alembic"
+  ]
+}
