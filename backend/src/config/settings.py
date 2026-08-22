@@ -52,15 +52,25 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 10080  # 7 days
 
-    # ── Agent Executor ──────────────────────────
-    agent_mode: str = "mock"  # mock | llm
+    # ── Agent Executor & LLM ────────────────────
+    agent_mode: str = "llm"  # mock | llm
     mock_files_dir: str = "./src/infrastructure/executor/mock_data"
 
-    llm_provider: str = "openai"
+    llm_provider: str = "openai_compatible"
+    llm_base_url: str = "https://api.siliconflow.cn/v1"
     llm_api_key: str = ""
-    llm_model: str = "gpt-4o"
+    llm_model: str = "Qwen/Qwen3-8B"
+    llm_temperature: float = 0.2
     llm_timeout: int = 120
     llm_max_retries: int = 3
+    llm_max_steps: int = 15
+    llm_workspace_dir: str = "./workspace"
+
+    # ── Sandbox ─────────────────────────────────
+    sandbox_enabled: bool = True
+    sandbox_url: str = "http://localhost:5050"
+    sandbox_timeout: int = 60
+
 
     # ── Worker ──────────────────────────────────
     worker_concurrency: int = 4

@@ -6,6 +6,7 @@ import { useSessionStore } from "@/store/useSessionStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { formatDate } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
+import { EcosystemModal } from "@/components/settings/EcosystemModal";
 
 export const Sidebar: React.FC = () => {
   const token = useAuthStore((state) => state.token);
@@ -19,6 +20,7 @@ export const Sidebar: React.FC = () => {
   const isLoadingSessions = useSessionStore((state) => state.isLoadingSessions);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [isEcosystemOpen, setIsEcosystemOpen] = useState(false);
 
   const filteredSessions = useMemo(() => {
     if (!searchQuery.trim()) return sessions;
@@ -121,6 +123,22 @@ export const Sidebar: React.FC = () => {
         )}
       </div>
 
+      {/* 生态集成入口 */}
+      <div className="px-3 py-2 border-t border-slate-800/80 bg-slate-950/40">
+        <button
+          onClick={() => setIsEcosystemOpen(true)}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 text-slate-300 hover:text-white transition-all shadow-sm group"
+        >
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-400 group-hover:scale-110 transition-transform" />
+            <span>生态集成 (MCP / A2A)</span>
+          </div>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+            配置
+          </span>
+        </button>
+      </div>
+
       {/* 底部用户信息 & 登出 */}
       <div className="p-3 border-t border-slate-800/80 bg-slate-950/50">
         <div className="flex items-center justify-between p-2 rounded-xl bg-slate-900/80 border border-slate-800">
@@ -145,6 +163,12 @@ export const Sidebar: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* 生态配置弹窗 */}
+      <EcosystemModal
+        isOpen={isEcosystemOpen}
+        onClose={() => setIsEcosystemOpen(false)}
+      />
     </aside>
   );
 };

@@ -14,8 +14,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next):
-        # 排除无需限流的路径（如健康检查）
-        if not settings.rate_limit_enabled or request.url.path.startswith("/health") or request.url.path.startswith("/docs") or request.url.path.startswith("/openapi.json"):
+        # 排除预检 OPTIONS 请求及无需限流的路径
+        if (
+            request.method == "OPTIONS"
+            or not settings.rate_limit_enabled
+            or request.url.path.startswith("/health")
+            or request.url.path.startswith("/docs")
+            or request.url.path.startswith("/openapi.json")
+        ):
             return await call_next(request)
 
         # 获取客户端标识（优先从 Authorization token 或客户端 IP）

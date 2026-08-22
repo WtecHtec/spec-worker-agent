@@ -14,7 +14,7 @@ interface SessionState {
   fetchSessions: (token: string) => Promise<void>;
   createSession: (token: string, title?: string) => Promise<Session>;
   selectSession: (sessionId: string, token: string) => Promise<void>;
-  fetchMessages: (sessionId: string, token: string) => Promise<void>;
+  fetchMessages: (sessionId: string, token: string, silent?: boolean) => Promise<void>;
   sendMessage: (content: string, token: string) => Promise<{ taskId: string; messageId: string }>;
   appendMessage: (message: Message) => void;
   updateMessage: (messageId: string, updates: Partial<Message>) => void;
@@ -60,8 +60,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     await get().fetchMessages(sessionId, token);
   },
 
-  fetchMessages: async (sessionId: string, token: string) => {
-    set({ isLoadingMessages: true, error: null });
+  fetchMessages: async (sessionId: string, token: string, silent: boolean = false) => {
+    if (!silent) {
+      set({ isLoadingMessages: true, error: null });
+    }
     try {
       const data = await api.getSessionMessages(sessionId, token);
       set({ messages: data, isLoadingMessages: false });
@@ -71,16 +73,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   sendMessage: async (content: string, token: string) => {
-    const { currentSessionId } = get();
-    if (!currentSessionId) throw new Error("No active session");
+    let sessionId = get().currentSessionId;
+    if (!sessionId) {
+      const autoTitle = content.length > 24 ? `${content.slice(0, 24)}...` : content;
+      const created = await get().createSession(token, autoTitle);
+      sessionId = created.id;
+    }
 
     set({ isSending: true, error: null });
 
     try {
-      const res = await api.sendMessage(currentSessionId, content, token);
+      const res = await api.sendMessage(sessionId, content, token);
 
-      // 重新刷新消息列表以获取服务端生成的准确 seq 和状态
-      await get().fetchMessages(currentSessionId, token);
+      // 静默刷新消息列表，避免 isLoadingMessages 清空当前 DOM 导致页面跳顶
+      await get().fetchMessages(sessionId, token, true);
       set({ isSending: false });
 
       return { taskId: res.task_id, messageId: res.message_id };
@@ -89,6 +95,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       throw err;
     }
   },
+
 
   appendMessage: (message: Message) => {
     set((state) => ({

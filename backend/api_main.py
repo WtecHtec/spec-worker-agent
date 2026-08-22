@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from src.config.settings import get_settings
 from src.infrastructure.redis.client import close_redis
-from src.interface.routers import auth, session, message, task, hitl
+from src.interface.routers import auth, session, message, task, hitl, ecosystem
 from src.interface.middleware.rate_limiter import RateLimitMiddleware
 from src.interface.middleware.error_handler import (
     RequestContextMiddleware, register_exception_handlers
@@ -35,8 +35,27 @@ logger = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+    from src.domain.services.tools.manager import user_tool_registry_manager
+
     logger.info("api_server_starting", env=settings.app_env)
+    try:
+        from src.infrastructure.db.database import engine
+        from src.infrastructure.db.models import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("database_tables_ensured")
+    except Exception as e:
+        logger.warning("database_tables_init_warning", error=str(e))
+
+    # 启动 Redis 跨进程缓存失效监听器
+    invalidation_task = asyncio.create_task(
+        user_tool_registry_manager.start_invalidation_listener()
+    )
+
     yield
+
+    invalidation_task.cancel()
     await close_redis()
     logger.info("api_server_stopped")
 
@@ -50,16 +69,26 @@ app = FastAPI(
 # 1. 注册统一异常处理
 register_exception_handlers(app)
 
-# 2. 注册中间件（执行顺序：CORS -> RequestContext -> RateLimit）
+# 2. 注册中间件（注意：FastAPI 中间件是洋葱模型，后添加的在外层先执行）
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID", "X-Process-Time"],
 )
-app.add_middleware(RateLimitMiddleware)
-app.add_middleware(RequestContextMiddleware)
+
+
+from src.interface.routers import auth, session, message, task, hitl, ecosystem
 
 # 3. 注册业务路由
 app.include_router(auth.router)
@@ -67,6 +96,7 @@ app.include_router(session.router)
 app.include_router(message.router)
 app.include_router(task.router)
 app.include_router(hitl.router)
+app.include_router(ecosystem.router)
 
 
 # 4. 健康检查与探针接口

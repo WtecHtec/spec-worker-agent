@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.db.models import (
     UserModel, SessionModel, MessageModel,
     TaskModel, TaskStepModel, TaskCheckpointModel, HitlRequestModel,
+    EcosystemConfigModel,
 )
 from src.domain.entities.models import (
     User, Session, Message, Task, TaskStep, Checkpoint, HitlRequest,
@@ -110,7 +111,10 @@ class SessionRepository(ISessionRepository):
         result = await self.db.execute(
             select(SessionModel)
             .where(SessionModel.user_id == user_id, SessionModel.status == "active")
-            .order_by(SessionModel.last_message_at.desc().nullslast())
+            .order_by(
+                func.coalesce(SessionModel.last_message_at, SessionModel.created_at).desc(),
+                SessionModel.created_at.desc(),
+            )
             .limit(limit)
         )
         return [to_session(m) for m in result.scalars().all()]
@@ -161,6 +165,17 @@ class MessageRepository(IMessageRepository):
         m = MessageModel(session_id=session_id, role=role, content=content,
                          content_type=content_type, task_id=task_id, status=status)
         self.db.add(m)
+
+        # 同步递增所属会话的消息计数，并更新活跃时间
+        await self.db.execute(
+            update(SessionModel)
+            .where(SessionModel.id == session_id)
+            .values(
+                message_count=SessionModel.message_count + 1,
+                last_message_at=func.now(),
+            )
+        )
+
         await self.db.flush()
         return to_message(m)
 
@@ -418,3 +433,67 @@ class HitlRepository(IHitlRepository):
                 responded_at=datetime.now(timezone.utc),
             )
         )
+
+
+class EcosystemConfigRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def list_by_user(self, user_id: str, type: str | None = None) -> list[EcosystemConfigModel]:
+        stmt = select(EcosystemConfigModel).where(EcosystemConfigModel.user_id == user_id)
+        if type:
+            stmt = stmt.where(EcosystemConfigModel.type == type)
+        stmt = stmt.order_by(EcosystemConfigModel.created_at.desc())
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_id(self, config_id: str, user_id: str | None = None) -> EcosystemConfigModel | None:
+        stmt = select(EcosystemConfigModel).where(EcosystemConfigModel.id == config_id)
+        if user_id:
+            stmt = stmt.where(EcosystemConfigModel.user_id == user_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def create(
+        self,
+        user_id: str,
+        type: str,
+        name: str,
+        transport: str = "sse",
+        server_url: str | None = None,
+        command: str | None = None,
+        args: list[str] | None = None,
+        namespace: str = "custom",
+        description: str | None = None,
+        cached_tools: list[dict] | None = None,
+    ) -> EcosystemConfigModel:
+        model = EcosystemConfigModel(
+            user_id=user_id,
+            type=type,
+            name=name,
+            transport=transport,
+            server_url=server_url,
+            command=command,
+            args=args or [],
+            namespace=namespace,
+            description=description,
+            cached_tools=cached_tools or [],
+            enabled=True,
+        )
+        self.db.add(model)
+        await self.db.flush()
+        return model
+
+    async def delete(self, config_id: str, user_id: str) -> bool:
+        stmt = select(EcosystemConfigModel).where(
+            EcosystemConfigModel.id == config_id,
+            EcosystemConfigModel.user_id == user_id,
+        )
+        result = await self.db.execute(stmt)
+        m = result.scalar_one_or_none()
+        if m:
+            await self.db.delete(m)
+            await self.db.flush()
+            return True
+        return False
+

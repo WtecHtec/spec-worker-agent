@@ -78,6 +78,20 @@ export const FinalStep: React.FC<FinalStepProps> = React.memo(({
                 </td>
               );
             },
+            a({ href, children, ...props }) {
+              return (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 underline underline-offset-4 decoration-indigo-500/50 hover:decoration-indigo-400 transition-colors font-medium cursor-pointer"
+                  {...props}
+                >
+                  <span>{children}</span>
+                  <span className="text-[10px] opacity-80">↗</span>
+                </a>
+              );
+            },
           }}
         >
           {displayedText}
