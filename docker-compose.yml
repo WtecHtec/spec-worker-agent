@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  # ─── 1. PostgreSQL 关系型数据库 ───
+  postgres:
+    image: postgres:17-alpine
+    container_name: agent_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d app"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── 2. Redis 内存缓存与任务流队列 ───
+  redis:
+    image: redis:7-alpine
+    container_name: agent_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── 3. Backend API Server (FastAPI) ───
+  backend-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agent_api
+    command: >
+      sh -c "uv run alembic upgrade head &&
+             uv run uvicorn api_main:app --host 0.0.0.0 --port 8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/app
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+      RATE_LIMIT_ENABLED: "true"
+      MAX_CONCURRENT_TASKS_PER_USER: 3
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── 4. Backend Worker (任务执行与调度引擎) ───
+  backend-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agent_worker
+    command: ["uv", "run", "python3", "worker_main.py"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/app
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+      WORKER_HEARTBEAT_TIMEOUT: 30
+      WORKER_POLL_INTERVAL: 1.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend-api:
+        condition: service_started
+    restart: unless-stopped
+
+  # ─── 5. Frontend Client (Next.js 14) ───
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: agent_frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend-api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
