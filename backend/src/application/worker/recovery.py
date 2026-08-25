@@ -24,6 +24,10 @@ async def recover_paused_tasks():
 
         paused_tasks = await task_repo.list_paused_shutdown_tasks()
         for task in paused_tasks:
+            # 跳过已被用户取消的任务
+            if await redis.exists(f"task:cancelled:{task.id}"):
+                logger.info("skip_recovering_cancelled_task", task_id=task.id)
+                continue
             ckpt = await ckpt_repo.get_by_task(task.id)
             resume_from = ckpt.last_completed_step if ckpt else 0
             await task_repo.update_status(task.id, "PENDING", paused_reason=None)
@@ -44,6 +48,10 @@ async def recover_zombie_tasks():
             timeout_seconds=settings.worker_heartbeat_timeout
         )
         for task in zombies:
+            # 跳过已被用户取消的任务
+            if await redis.exists(f"task:cancelled:{task.id}"):
+                logger.info("skip_recovering_cancelled_zombie", task_id=task.id)
+                continue
             ckpt = await ckpt_repo.get_by_task(task.id)
             resume_from = ckpt.last_completed_step if ckpt else 0
             await task_repo.update_status(

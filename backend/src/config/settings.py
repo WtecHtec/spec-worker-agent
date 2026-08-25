@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     llm_max_steps: int = 15
     llm_workspace_dir: str = "./workspace"
 
+    # ── Flow & Agent Circuit Breaker Limits ─────
+    agent_flow_max_steps: int = 100  # PlanAndExecuteFlow 全局最大事件防失控熔断步数
+    agent_flow_max_replans: int = 3  # 最大动态重规划次数
+
     # ── Sandbox ─────────────────────────────────
     sandbox_enabled: bool = True
     sandbox_url: str = "http://localhost:5050"

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Message } from "@/types";
 import { StepContainer } from "../steps/StepContainer";
 import { CodeBlock } from "@/components/ui/CodeBlock";
@@ -112,6 +113,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
               {message.content?.text ? (
                 <div className="prose prose-invert prose-sm max-w-none text-slate-100 text-sm leading-relaxed font-sans">
                   <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
                     components={{
                       code({ className, children, ...props }) {
                         const match = /language-(\w+)/.exec(className || "");
@@ -120,7 +122,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
                         if (isInline) {
                           return (
                             <code
-                              className="px-1.5 py-0.5 rounded-md bg-slate-800 text-indigo-300 font-mono text-xs border border-slate-700"
+                              className="px-1.5 py-0.5 rounded-md bg-slate-800 text-indigo-300 font-mono text-xs border border-slate-700 select-text"
                               {...props}
                             >
                               {children}
@@ -159,11 +161,24 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
                         );
                       },
                       a({ href, children, ...props }) {
+                        let targetHref = href || "#";
+                        // 智能补全未带域名的沙箱文件链接或相对路径
+                        if (!targetHref.startsWith("http://") && !targetHref.startsWith("https://") && !targetHref.startsWith("mailto:") && !targetHref.startsWith("#")) {
+                          if (targetHref.startsWith("/fs/raw") || targetHref.startsWith("/fs/preview")) {
+                            targetHref = `http://localhost:5050${targetHref}`;
+                          } else if (targetHref.startsWith("screenshots/") || targetHref.startsWith("images/") || targetHref.endsWith(".png") || targetHref.endsWith(".jpg") || targetHref.endsWith(".jpeg") || targetHref.endsWith(".webp")) {
+                            targetHref = `http://localhost:5050/fs/raw?path=${encodeURIComponent(targetHref.replace(/^\.?\//, ""))}`;
+                          } else if (targetHref.startsWith("/")) {
+                            targetHref = `http://localhost:5050/fs/raw?path=${encodeURIComponent(targetHref.replace(/^\//, ""))}`;
+                          }
+                        }
+
                         return (
                           <a
-                            href={href}
+                            href={targetHref}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
                             className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 underline underline-offset-4 decoration-indigo-500/50 hover:decoration-indigo-400 transition-colors font-medium cursor-pointer"
                             {...props}
                           >

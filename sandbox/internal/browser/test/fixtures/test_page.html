@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>P0 浏览器自动化测试页面</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 20px; }
+        .card { border: 1px solid #ccc; padding: 16px; margin: 10px 0; border-radius: 8px; }
+        .card-title { font-size: 18px; font-weight: bold; margin-bottom: 8px; }
+        .custom-div-btn {
+            display: inline-block;
+            background: #007aff;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .custom-div-btn:hover { background: #005bb5; }
+        #cart-count { font-weight: bold; color: red; }
+    </style>
+</head>
+<body>
+    <h1>测试页面：商品与操作中心</h1>
+    
+    <div class="search-bar">
+        <input id="search-input" type="text" placeholder="请输入商品名称" value="">
+        <div id="search-btn" class="custom-div-btn" onclick="document.getElementById('status-msg').innerText = '正在搜索...'">
+            🔍 搜索商品 (div 按钮)
+        </div>
+    </div>
+    <div id="status-msg">等待操作</div>
+
+    <hr/>
+
+    <div class="card">
+        <div class="card-title">Apple M4 Mac Mini (16G+256G)</div>
+        <p>价格: ¥4499</p>
+        <div id="buy-btn" class="custom-div-btn" role="button" onclick="incrementCart()">
+            🛒 加入购物车 (div 按钮)
+        </div>
+    </div>
+
+    <div>已加入购物车数量: <span id="cart-count">0</span></div>
+
+    <script>
+        let count = 0;
+        function incrementCart() {
+            count++;
+            document.getElementById('cart-count').innerText = count.toString();
+        }
+    </script>
+</body>
+</html>

@@ -43,7 +43,7 @@ export default function Home() {
   }
 
   return (
-    <main className="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 font-sans antialiased select-none">
+    <main className="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 font-sans antialiased">
       <ToastContainer />
       {/* 侧边栏 */}
       <Sidebar />

@@ -114,6 +114,92 @@ class SandboxClient:
             res = await client.post(f"{self.base_url}/fs/list", json=payload)
             return res.json() if res.status_code == 200 else {"files": [], "error": res.text}
 
+    # ─── CDP Browser Automation APIs ───
+
+    async def browser_open(
+        self,
+        url: str,
+        session_id: str = "default",
+        timeout_sec: int = 30,
+    ) -> dict[str, Any]:
+        """打开指定 URL 网页"""
+        payload = {"url": url, "session_id": session_id, "timeout_sec": timeout_sec}
+        async with httpx.AsyncClient(timeout=float(timeout_sec + 5)) as client:
+            res = await client.post(f"{self.base_url}/tools/browser/open", json=payload)
+            if res.status_code != 200:
+                return {"success": False, "error": f"打开网页失败 ({res.status_code}): {res.text}"}
+            return res.json()
+
+    async def browser_close(self, session_id: str = "default") -> dict[str, Any]:
+        """关闭网页并销毁会话资源"""
+        payload = {"session_id": session_id}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.post(f"{self.base_url}/tools/browser/close", json=payload)
+            if res.status_code != 200:
+                return {"success": False, "error": f"关闭网页失败 ({res.status_code}): {res.text}"}
+            return res.json()
+
+    async def browser_get_snapshot(
+        self,
+        session_id: str = "default",
+        include_screenshot: bool = False,
+    ) -> dict[str, Any]:
+        """获取当前视口已编号结构与页面快照"""
+        payload = {"session_id": session_id, "include_screenshot": include_screenshot}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.post(f"{self.base_url}/tools/browser/snapshot", json=payload)
+            if res.status_code != 200:
+                return {"success": False, "error": f"获取快照失败 ({res.status_code}): {res.text}"}
+            return res.json()
+
+    async def browser_click(
+        self,
+        element_id: int,
+        session_id: str = "default",
+    ) -> dict[str, Any]:
+        """根据已分配的编号点击元素"""
+        payload = {"element_id": element_id, "session_id": session_id}
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.post(f"{self.base_url}/tools/browser/click", json=payload)
+            if res.status_code != 200:
+                return {"success": False, "error": f"点击元素失败 ({res.status_code}): {res.text}"}
+            return res.json()
+
+    async def browser_screenshot(
+        self,
+        full_page: bool = False,
+        save_path: str | None = None,
+        session_id: str = "default",
+    ) -> dict[str, Any]:
+        """获取页面截图并落地保存到沙箱工作区"""
+        payload: dict[str, Any] = {"full_page": full_page, "session_id": session_id}
+        if save_path:
+            payload["save_path"] = save_path
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.post(f"{self.base_url}/tools/browser/screenshot", json=payload)
+            if res.status_code != 200:
+                return {"success": False, "error": f"截图失败 ({res.status_code}): {res.text}"}
+            return res.json()
+
+    async def browser_execute(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        session_id: str = "default",
+    ) -> dict[str, Any]:
+        """通用浏览器工具分发入口"""
+        payload = {
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "session_id": session_id,
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            res = await client.post(f"{self.base_url}/tools/browser/execute", json=payload)
+            if res.status_code != 200:
+                return {"success": False, "error": f"执行工具失败 ({res.status_code}): {res.text}"}
+            return res.json()
+
 
 _default_client: SandboxClient | None = None
 

@@ -33,9 +33,11 @@ class LlmAgentExecutor(AgentExecutor):
         user_id = self.task_input.get("user_id", "local_user")
         ctx = {
             "task_id": self.task_input.get("task_id", "local_task"),
+            "session_id": self.task_input.get("session_id", "default"),
             "user_id": user_id,
             "workspace_dir": self.settings.llm_workspace_dir,
             "resume_from_step": self.resume_from_step,
+            "history_messages": self.task_input.get("history_messages", []),
         }
 
         # 3. 获取用户级 ToolRegistry（优先命中内存热缓存，仅首次或配置变更时挂载）

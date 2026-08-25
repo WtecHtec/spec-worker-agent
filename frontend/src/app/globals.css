@@ -63,3 +63,26 @@ body {
   margin-top: 0.25em;
   margin-bottom: 0.25em;
 }
+
+/* 文本选择与可复制增强 */
+.select-text,
+.prose,
+.prose p,
+.prose span,
+.prose code,
+.prose pre,
+.prose table {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.prose a {
+  color: #818cf8;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+.prose a:hover {
+  color: #a5b4fc;
+}

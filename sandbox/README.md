@@ -29,3 +29,9 @@ docker run -d -p 5000:5000 --name agent_sandbox agent-sandbox:latest
 | `/fs/read` | POST | 读取文件 | `{"file_path": "main.py", "start_line": 1, "end_line": 50}` |
 | `/fs/write` | POST | 写入文件 | `{"file_path": "main.py", "content": "..."}` |
 | `/fs/list` | POST | 列出目录 | `{"dir_path": "."}` |
+| `/tools/browser/open` | POST | 打开网页并返回已编号结构快照 | `{"url": "https://example.com"}` |
+| `/tools/browser/click` | POST | 根据编号点击页面元素 | `{"element_id": 1}` |
+| `/tools/browser/snapshot` | POST | 刷新提取当前页面已编号结构 | `{"include_screenshot": true}` |
+| `/tools/browser/screenshot` | POST | 截取视口/全屏 Base64 图像 | `{"full_page": false}` |
+| `/tools/browser/close` | POST | 关闭当前页面并释放资源 | `{}` |
+| `/tools/browser/execute` | POST | 通用浏览器工具动态分发网关 | `{"tool_name": "browser_click", "arguments": {"element_id": 1}}` |

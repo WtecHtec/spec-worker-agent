@@ -142,4 +142,19 @@ def create_default_registry() -> ToolRegistry:
     registry.register(SandboxRunCommandTool())
     registry.register(SandboxReadFileTool())
     registry.register(SandboxWriteFileTool())
+
+    # 3. 沙箱 CDP 浏览器工具 (Browser Tools)
+    from .browser import (
+        BrowserOpenPageTool,
+        BrowserClosePageTool,
+        BrowserGetSnapshotTool,
+        BrowserClickTool,
+        BrowserScreenshotTool,
+    )
+    registry.register(BrowserOpenPageTool())
+    registry.register(BrowserClosePageTool())
+    registry.register(BrowserGetSnapshotTool())
+    registry.register(BrowserClickTool())
+    registry.register(BrowserScreenshotTool())
+
     return registry

@@ -59,6 +59,11 @@ class CancelTaskUseCase:
 
         await self.db.commit()
 
+        # 写入 Redis 快速取消标记（TTL 24小时，确保 Worker 与调度器毫秒级感知）
+        from src.infrastructure.redis.client import get_redis
+        redis = await get_redis()
+        await redis.set(f"task:cancelled:{task_id}", "1", ex=86400)
+
         # 发布取消广播事件
         await self.event_publisher.publish(task_id, {
             "event": "task_cancelled",

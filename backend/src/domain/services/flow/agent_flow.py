@@ -5,6 +5,7 @@ from src.domain.services.agents.react import ReActAgent
 from src.domain.services.memory.memory_manager import MemoryManager
 from src.domain.services.memory.episodic_memory import EpisodicMemoryManager
 from src.domain.services.tools.registry import ToolRegistry, create_default_registry
+from src.config.settings import get_settings
 
 logger = structlog.get_logger()
 
@@ -20,13 +21,16 @@ class PlanAndExecuteFlow:
         self,
         planner: PlannerAgent | None = None,
         tool_registry: ToolRegistry | None = None,
-        max_replans: int = 3,
+        max_replans: int | None = None,
+        max_flow_steps: int | None = None,
     ):
+        self.settings = get_settings()
         self.tool_registry = tool_registry or create_default_registry()
         self.planner = planner or PlannerAgent(tool_registry=self.tool_registry)
         self.memory_manager = MemoryManager()
         self.episodic_memory = EpisodicMemoryManager()
-        self.max_replans = max_replans
+        self.max_replans = max_replans if max_replans is not None else self.settings.agent_flow_max_replans
+        self.max_flow_steps = max_flow_steps if max_flow_steps is not None else self.settings.agent_flow_max_steps
 
     async def run(
         self, instruction: str, ctx: dict[str, Any]
@@ -171,9 +175,9 @@ class PlanAndExecuteFlow:
             }
             i += 1
 
-            # 全局最大步数防失控硬熔断
-            if step_index >= 20:
-                log.warning("flow_exceeded_global_step_limit", step_index=step_index)
+            # 全局最大事件步数防失控硬熔断（通过 AGENT_FLOW_MAX_STEPS 配置）
+            if step_index >= self.max_flow_steps:
+                log.warning("flow_exceeded_global_step_limit", step_index=step_index, max_flow_steps=self.max_flow_steps)
                 break
 
         # ── 3. 全局总结收敛与经验沉淀 ──

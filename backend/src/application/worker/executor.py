@@ -1,3 +1,5 @@
+import os
+import sys
 import asyncio
 import signal
 import uuid
@@ -21,12 +23,17 @@ logger = structlog.get_logger()
 
 WORKER_ID = f"worker-{uuid.uuid4().hex[:8]}"
 _shutdown = False
+_signal_count = 0
 
 
 def _handle_signal(sig, frame):
-    global _shutdown
-    logger.info("shutdown_signal_received", signal=sig)
+    global _shutdown, _signal_count
+    _signal_count += 1
+    logger.info("shutdown_signal_received", signal=sig, count=_signal_count)
     _shutdown = True
+    if _signal_count >= 2:
+        logger.warning("force_exit_immediately")
+        os._exit(130)
 
 
 async def process_task(task_id: str, resume_from_step: int, msg_id: str):
@@ -48,7 +55,12 @@ async def process_task(task_id: str, resume_from_step: int, msg_id: str):
             return
 
         try:
-            # 2. 加载任务和 Checkpoint
+            # 2. 加载任务和 Checkpoint（优先校验是否已被取消）
+            if await redis.exists(f"task:cancelled:{task_id}"):
+                log.info("task_already_cancelled_before_execution")
+                await queue.ack(msg_id)
+                return
+
             task = await task_repo.get_by_id(task_id)
             if not task or task.status in ("COMPLETED", "FAILED", "CANCELLED"):
                 log.info("task_already_finished", status=task.status if task else "not_found")
@@ -69,30 +81,52 @@ async def process_task(task_id: str, resume_from_step: int, msg_id: str):
                 started_at=now,
             )
             await db.commit()
-            log.info("task_started")
+            # 4. 加载会话最近 10 条历史消息上下文（供 Planner / ReAct 理解多轮连续指令如“继续”）
+            history_messages = []
+            if task.session_id:
+                raw_msgs = await msg_repo.list_by_session(task.session_id, limit=15)
+                for m in raw_msgs:
+                    # 过滤当前任务对应的触发消息与流式占位消息
+                    if m.task_id == task.id or (m.role == "AGENT" and m.status == "streaming" and not m.content.get("text")):
+                        continue
+                    text = m.content.get("text") or m.content.get("summary") or ""
+                    if text.strip():
+                        history_messages.append({
+                            "role": "user" if m.role == "USER" else "assistant",
+                            "content": text.strip(),
+                        })
+                history_messages = history_messages[-10:]
 
-            # 4. 通过工厂创建执行器（mock / llm 由 AGENT_MODE 决定）
             task_input = dict(task.input) if isinstance(task.input, dict) else {"content": str(task.input)}
             task_input["user_id"] = task.user_id
             task_input["task_id"] = task.id
+            task_input["session_id"] = task.session_id
+            task_input["history_messages"] = history_messages
+
             executor = create_executor(task_input, resume_from_step=resume_from_step)
             current_version = checkpoint.version
             last_step = resume_from_step
 
             # 5. 执行循环
             async for step in executor.run():
+                # 检查任务是否已被用户取消（Redis 快速感知 + DB 实时检查）
+                if await redis.exists(f"task:cancelled:{task_id}"):
+                    log.info("task_was_cancelled_by_redis_signal")
+                    await queue.ack(msg_id)
+                    return
+
+                db.expire_all()
+                fresh_task = await task_repo.get_by_id(task_id)
+                if not fresh_task or fresh_task.status == "CANCELLED":
+                    log.info("task_was_cancelled_aborting")
+                    await queue.ack(msg_id)
+                    return
+
                 if _shutdown:
                     log.info("graceful_shutdown_pause")
                     await task_repo.update_status(task_id, "PAUSED",
                                                   paused_reason="worker_shutdown")
                     await db.commit()
-                    return
-
-                # 检查任务是否已被用户取消
-                fresh_task = await task_repo.get_by_id(task_id)
-                if not fresh_task or fresh_task.status == "CANCELLED":
-                    log.info("task_was_cancelled_aborting")
-                    await queue.ack(msg_id)
                     return
 
                 step_index = step["step_index"]
@@ -182,6 +216,13 @@ async def process_task(task_id: str, resume_from_step: int, msg_id: str):
 
             # 6. 任务完成
             # 再次检查是否被取消
+            fresh_task = await task_repo.get_by_id(task_id)
+            if await redis.exists(f"task:cancelled:{task_id}"):
+                log.info("task_cancelled_by_redis_signal_at_finish")
+                await queue.ack(msg_id)
+                return
+
+            db.expire_all()
             fresh_task = await task_repo.get_by_id(task_id)
             if fresh_task and fresh_task.status == "CANCELLED":
                 log.info("task_cancelled_at_finish_aborting")
@@ -287,9 +328,21 @@ async def main():
     workers = [asyncio.create_task(worker_loop())
                for _ in range(settings.worker_concurrency)]
 
-    await asyncio.gather(*workers)
-    scheduler_task.cancel()
-    invalidation_listener_task.cancel()
+    try:
+        while not _shutdown:
+            await asyncio.sleep(0.3)
+            # 若所有 worker 都已结束则退出
+            if all(w.done() for w in workers):
+                break
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        pass
+    finally:
+        for w in workers:
+            w.cancel()
+        scheduler_task.cancel()
+        invalidation_listener_task.cancel()
+        await asyncio.gather(*workers, scheduler_task, invalidation_listener_task, return_exceptions=True)
+        logger.info("worker_main_shutdown_complete")
 
 
 if __name__ == "__main__":

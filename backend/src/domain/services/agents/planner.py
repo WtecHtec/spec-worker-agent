@@ -66,13 +66,24 @@ class PlannerAgent(BaseAgent):
         根据用户宏观目标生成初始结构化计划
         """
         system_prompt = self.get_system_prompt(ctx)
+        history_messages = ctx.get("history_messages", [])
+        
         messages = [
             {"role": "system", "content": system_prompt},
-            {
+        ]
+        # 注入历史对话窗口（最近 10 条真实交互）
+        if history_messages:
+            for hm in history_messages:
+                messages.append({"role": hm["role"], "content": hm["content"]})
+            messages.append({
+                "role": "user",
+                "content": f"【用户最新指令】：{goal}\n\n请结合上述历史对话上下文与前置执行结果，为当前目标制定接下来的详细执行计划（输出标准 JSON 格式）：",
+            })
+        else:
+            messages.append({
                 "role": "user",
                 "content": f"请为以下任务目标制定详细的执行计划（输出标准 JSON 格式）：\n\n【任务目标】：{goal}",
-            },
-        ]
+            })
 
         logger.info("planner_generating_initial_plan", goal=goal)
         response = await self.client.chat.completions.create(

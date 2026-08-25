@@ -168,3 +168,33 @@ async def test_plan_and_execute_flow_execution():
             # 验证单步快速任务直接产出最终结果
             final_step = next(e for e in events if e["type"] == "FINAL")
             assert "文件创建完成" in final_step["content"]["text"]
+
+
+@pytest.mark.asyncio
+async def test_planner_with_history_messages():
+    planner = PlannerAgent()
+    mock_plan_json = '{"goal": "截取博客页面", "steps": [{"id": 1, "title": "截图", "description": "截取博客", "status": "pending"}]}'
+
+    with patch.object(planner.client.chat.completions, "create", new_callable=AsyncMock) as mock_create:
+        mock_choice = MagicMock()
+        mock_choice.message.content = mock_plan_json
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        mock_create.return_value = mock_response
+
+        ctx = {
+            "history_messages": [
+                {"role": "user", "content": "打开主页并点击进入博客"},
+                {"role": "assistant", "content": "已打开博客页面，下一步可进行截图。"},
+            ]
+        }
+        plan = await planner.create_plan("继续", ctx)
+        assert plan.goal == "截取博客页面"
+        
+        # 验证发送给 LLM 的 messages 中包含了历史消息
+        call_kwargs = mock_create.call_args[1]
+        sent_messages = call_kwargs["messages"]
+        assert len(sent_messages) == 4  # system + 2 history + user goal
+        assert sent_messages[1]["content"] == "打开主页并点击进入博客"
+        assert sent_messages[2]["content"] == "已打开博客页面，下一步可进行截图。"
+        assert "继续" in sent_messages[3]["content"]

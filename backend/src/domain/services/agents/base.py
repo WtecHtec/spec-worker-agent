@@ -109,12 +109,13 @@ class BaseAgent(ABC):
         log = logger.bind(task_id=task_id, agent=agent_name, model=self.model)
         log.info("starting_agent_run", instruction=instruction)
 
-        # 1. 组装 System Prompt 与初始消息
+        # 1. 组装 System Prompt 与初始消息（附带最近 10 条会话历史）
         system_prompt = self.get_system_prompt(ctx)
-        self.messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": instruction},
-        ]
+        history_messages = ctx.get("history_messages", [])
+        self.messages = [{"role": "system", "content": system_prompt}]
+        for hm in history_messages:
+            self.messages.append({"role": hm["role"], "content": hm["content"]})
+        self.messages.append({"role": "user", "content": instruction})
 
         step_index = resume_from_step
         tools_schema = self.get_tools_schema()

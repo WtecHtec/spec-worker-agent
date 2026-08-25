@@ -63,8 +63,46 @@ class SendMessageUseCase:
         active_count = await self.task_repo.count_active_by_user(user_id)
         TaskSchedulerService.validate_user_quota(user, active_count)
 
-        # 3. 检查单会话并发互斥
+        # 3. 检查单会话并发互斥与自动自愈遗留任务（Self-Healing Concurrency）
+        from datetime import datetime, timezone
+        from src.infrastructure.redis.client import get_redis
+        redis = await get_redis()
+
         running_task = await self.task_repo.get_active_in_session(session_id)
+        if running_task and not running_task.is_terminal:
+            is_cancelled = await redis.exists(f"task:cancelled:{running_task.id}")
+            is_zombie_or_paused = False
+            if running_task.status == "PAUSED":
+                is_zombie_or_paused = True
+            elif running_task.status == "RUNNING":
+                if not running_task.worker_heartbeat:
+                    is_zombie_or_paused = True
+                else:
+                    now = datetime.now(timezone.utc)
+                    if (now - running_task.worker_heartbeat).total_seconds() > 60:
+                        is_zombie_or_paused = True
+
+            if is_cancelled or is_zombie_or_paused:
+                now = datetime.now(timezone.utc)
+                await self.task_repo.update_status(
+                    running_task.id,
+                    status="CANCELLED",
+                    error="Cancelled or superseded by new message",
+                    completed_at=now,
+                )
+                agent_msg = await self.message_repo.get_by_task_id(running_task.id)
+                if agent_msg and agent_msg.status != "done":
+                    await self.message_repo.update_message(
+                        agent_msg.id,
+                        status="failed",
+                        content={
+                            **agent_msg.content,
+                            "text": "任务已被取消或被新消息覆盖。",
+                            "task_status": "CANCELLED",
+                        },
+                    )
+                running_task = None
+
         TaskSchedulerService.validate_session_concurrency(session_id, running_task)
 
         # 4. 计算优先级
