@@ -1,10 +1,13 @@
 import asyncio
 import json
-from fastapi import APIRouter, Depends
+import httpx
+from fastapi import APIRouter, Depends, Query, Response, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config.settings import get_settings, Settings
+from src.domain.exceptions import TaskNotFoundException
 from src.infrastructure.db.database import get_db
 from src.infrastructure.db.repositories import TaskRepository, TaskStepRepository, MessageRepository
 from src.infrastructure.redis.client import get_redis
@@ -197,3 +200,50 @@ async def task_stream(
             "Connection": "keep-alive",
         },
     )
+
+
+@router.get("/{task_id}/artifacts/{file_path:path}")
+async def get_task_artifact_raw(
+    task_id: str,
+    file_path: str,
+    download: bool = Query(False),
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    """
+    流式读取并返回沙箱中的任务产物文件（支持浏览器直接 URL 预览/图片渲染/文件下载）
+    """
+    task_repo = TaskRepository(db)
+    task = await task_repo.get_by_id(task_id)
+    if not task or task.user_id != user_id:
+        raise TaskNotFoundException(task_id)
+
+    sandbox_url = settings.sandbox_url.rstrip("/")
+    target_url = f"{sandbox_url}/fs/raw?path={file_path}"
+    if download:
+        target_url += "&download=true"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            res = await client.get(target_url)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Failed to connect to sandbox: {str(e)}")
+
+        if res.status_code != 200:
+            raise HTTPException(status_code=res.status_code, detail=res.text)
+
+        content_type = res.headers.get("content-type", "application/octet-stream")
+        response_headers = {
+            "Content-Type": content_type,
+            "Access-Control-Allow-Origin": "*",
+        }
+        if "content-disposition" in res.headers:
+            response_headers["Content-Disposition"] = res.headers["content-disposition"]
+
+        return Response(
+            content=res.content,
+            media_type=content_type,
+            headers=response_headers,
+        )
+

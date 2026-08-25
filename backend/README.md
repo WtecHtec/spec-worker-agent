@@ -116,10 +116,10 @@ uv run alembic upgrade head
 ### 3. 启动服务
 ```bash
 # 终端 1：启动 API 服务
-uv run uvicorn api_main:app --host 0.0.0.0 --port 8000 --reload
+uv run python -m uvicorn api_main:app --host 0.0.0.0 --port 8000 --reload
 
 # 终端 2：启动 Worker 执行进程
-uv run python3 worker_main.py
+uv run python worker_main.py
 ```
 
 ### 4. 运行全量自动化测试

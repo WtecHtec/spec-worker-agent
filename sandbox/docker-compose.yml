@@ -1,0 +1,17 @@
+services:
+  agent-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent_sandbox
+    ports:
+      - "5050:5050"
+    environment:
+      - SANDBOX_PORT=5050
+      - SANDBOX_WORKSPACE=/workspace
+    volumes:
+      - sandbox_workspace:/workspace
+    restart: unless-stopped
+
+volumes:
+  sandbox_workspace:

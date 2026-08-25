@@ -41,7 +41,7 @@ export interface Message {
 
 export interface TaskStep {
   step_index: number;
-  type: "THINKING" | "TOOL_CALL" | "TOOL_RESULT" | "HITL_REQUEST" | "FINAL";
+  type: "THINKING" | "TOOL_CALL" | "TOOL_RESULT" | "HITL_REQUEST" | "FINAL" | "PLAN_GENERATED" | "PLAN_UPDATED";
   content: {
     text?: string;
     tool_name?: string;

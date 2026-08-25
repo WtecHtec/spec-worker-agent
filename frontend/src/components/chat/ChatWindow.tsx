@@ -57,20 +57,6 @@ export const ChatWindow: React.FC = () => {
     }
   };
 
-  if (!currentSessionId) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-950">
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white mb-4 shadow-xl shadow-indigo-950/50">
-          <Bot className="w-8 h-8" />
-        </div>
-        <h2 className="text-xl font-bold text-slate-100 mb-2">欢迎使用 Antigravity Agent</h2>
-        <p className="text-sm text-slate-400 max-w-md mb-6 leading-relaxed">
-          全链路企业级 Agent 交互平台。支持多步思维链推理、工具调用、人机协同（HITL）与断点续传。
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden">
       {/* 消息滚动区域 */}
@@ -78,15 +64,35 @@ export const ChatWindow: React.FC = () => {
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 space-y-2 scrollbar-thin scrollbar-thumb-slate-800"
       >
-        {isLoadingMessages ? (
+        {!currentSessionId || messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center p-8 max-w-lg mx-auto">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white mb-4 shadow-xl shadow-indigo-950/50">
+              <Bot className="w-7 h-7" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-100 mb-1.5">欢迎使用 Antigravity Agent</h2>
+            <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+              全链路企业级 Agent 交互平台。支持多步思维链推理、Docker 独立安全沙箱、工具调用与产物实时预览。
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full text-left">
+              <button
+                onClick={() => handleSend("请在沙箱中创建一个 demo.py 脚本并运行它，计算 2 的 16 次方")}
+                className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-indigo-500/40 hover:bg-slate-800/50 transition-all text-xs text-slate-300"
+              >
+                <span className="font-semibold text-indigo-400 block mb-0.5">🐍 沙箱代码执行</span>
+                创建 Python 脚本并在 Docker 中运行
+              </button>
+              <button
+                onClick={() => handleSend("请帮我编写一个展示 Agent 执行状态的 HTML 仪表盘网页并保存")}
+                className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-indigo-500/40 hover:bg-slate-800/50 transition-all text-xs text-slate-300"
+              >
+                <span className="font-semibold text-indigo-400 block mb-0.5">🌐 生成网页产物</span>
+                编写 HTML 报表并通过 URL 实时预览
+              </button>
+            </div>
+          </div>
+        ) : isLoadingMessages ? (
           <div className="flex items-center justify-center h-full text-xs text-slate-500 animate-pulse">
             正在加载会话历史...
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center text-slate-500 py-12">
-            <MessageSquare className="w-12 h-12 text-slate-700 mb-3" />
-            <p className="text-sm font-medium text-slate-400">会话暂无消息</p>
-            <p className="text-xs text-slate-600 mt-1">在下方输入指令，开启 Agent 任务探索</p>
           </div>
         ) : (
           messages.map((msg) => <MessageItem key={msg.id} message={msg} />)

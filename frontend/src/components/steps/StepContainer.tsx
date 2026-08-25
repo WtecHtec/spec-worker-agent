@@ -10,6 +10,8 @@ import { ToolCallStep } from "./ToolCallStep";
 import { ToolResultStep } from "./ToolResultStep";
 import { HitlStep } from "./HitlStep";
 import { FinalStep } from "./FinalStep";
+import { PlanStep } from "./PlanStep";
+import { BrainCircuit, Sparkles, Loader2 } from "lucide-react";
 
 interface StepContainerProps {
   taskId: string;
@@ -47,19 +49,59 @@ export const StepContainer: React.FC<StepContainerProps> = ({
       .catch((err) => console.error("Failed to load task steps:", err));
   }, [taskId, token, steps.length, setSteps]);
 
+  // 1. 初始等待阶段的动态加载卡片（流式任务）
   if (steps.length === 0 && isStreaming) {
     return (
-      <div className="flex items-center gap-2 py-3 text-xs text-slate-400 font-mono animate-pulse">
-        <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />
-        <span>Agent 正在初始化执行环境...</span>
+      <div className="flex items-center gap-2.5 py-3.5 px-4 my-2 rounded-xl bg-indigo-950/40 border border-indigo-500/25 text-xs text-indigo-300 backdrop-blur-md">
+        <div className="relative flex items-center justify-center">
+          <BrainCircuit className="w-4 h-4 text-indigo-400 animate-pulse" />
+          <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-indigo-400 rounded-full animate-ping" />
+        </div>
+        <span className="font-medium tracking-wide">Agent 正在深度分析指令与思考规划中...</span>
+        <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin ml-auto" />
       </div>
     );
   }
 
+  // 2. 展开历史任务但步骤尚未拉取完成时的加载卡片
+  if (steps.length === 0 && !isStreaming) {
+    return (
+      <div className="flex items-center gap-2 py-2.5 px-3.5 my-1.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 font-mono">
+        <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
+        <span>正在读取任务历史执行记录与工具调用数据...</span>
+      </div>
+    );
+  }
+
+  const lastStep = steps[steps.length - 1];
+  const hasFinished = lastStep?.type === "FINAL";
+
+  // 提取最新的规划状态对象（顶部固定单张动态更新的计划卡片）
+  const latestPlanStep = [...steps]
+    .reverse()
+    .find((s) => s.type === "PLAN_GENERATED" || s.type === "PLAN_UPDATED");
+
+  // 过滤出要在时间轴中展示的操作过程（排除中间穿插的重复 PLAN 记录）
+  const executionSteps = steps.filter(
+    (s) => s.type !== "PLAN_GENERATED" && s.type !== "PLAN_UPDATED"
+  );
+
   return (
-    <div className="space-y-1 my-2">
-      {steps.map((step, idx) => {
-        const isLatest = idx === steps.length - 1 && isStreaming;
+    <div className="space-y-1.5 my-2">
+      {/* 1. 顶部固定的动态规划看板 */}
+      {latestPlanStep && (
+        <PlanStep
+          key="living-plan-card"
+          stepIndex={latestPlanStep.step_index}
+          goal={latestPlanStep.content.goal || "任务宏观规划"}
+          steps={latestPlanStep.content.steps || []}
+          isReplan={latestPlanStep.type === "PLAN_UPDATED"}
+        />
+      )}
+
+      {/* 2. 中间与底部的执行步骤时间轴 */}
+      {executionSteps.map((step, idx) => {
+        const isLatest = idx === executionSteps.length - 1 && isStreaming;
 
         switch (step.type) {
           case "THINKING":
@@ -113,6 +155,25 @@ export const StepContainer: React.FC<StepContainerProps> = ({
         }
       })}
 
+      {/* 步骤推进中的动态 Thinking / Processing 提示 */}
+      {isStreaming && !hasFinished && (
+        <div className="flex items-center gap-2 px-3 py-2 my-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 text-xs font-mono backdrop-blur-sm">
+          <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
+          <span className="text-slate-400">
+            {lastStep?.type === "TOOL_CALL"
+              ? "沙箱正在执行工具调用并等待返回..."
+              : lastStep?.type === "TOOL_RESULT"
+              ? "Agent 正在综合分析观察结果，规划下一步..."
+              : "Agent 正在进行下一步推理..."}
+          </span>
+          <span className="flex space-x-1 ml-auto">
+            <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+            <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+            <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" />
+          </span>
+        </div>
+      )}
+
       {connectionStatus === "reconnecting" && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-mono animate-pulse mt-2">
           <div className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
@@ -122,3 +183,4 @@ export const StepContainer: React.FC<StepContainerProps> = ({
     </div>
   );
 };
+

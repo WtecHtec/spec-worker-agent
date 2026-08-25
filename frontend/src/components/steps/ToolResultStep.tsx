@@ -59,11 +59,24 @@ export const ToolResultStep: React.FC<ToolResultStepProps> = React.memo(({
             transition={{ duration: 0.2 }}
             className="px-3.5 py-2.5 border-t border-emerald-900/30 bg-slate-950/70 font-mono text-[11px] overflow-hidden"
           >
-            <div className="text-slate-400 mb-1 flex items-center gap-1.5">
-              <FileCode2 className="w-3 h-3 text-emerald-400" />
-              <span>返回数据：</span>
+            <div className="text-slate-400 mb-1 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <FileCode2 className="w-3 h-3 text-emerald-400" />
+                <span>返回数据：</span>
+              </div>
+              {typeof output === "string" && output.includes("/fs/raw?path=") && (
+                <a
+                  href={output.match(/https?:\/\/[^\s]+/)?.[0] || "#"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-[10px] font-sans font-medium transition-colors"
+                >
+                  <span>🌐 在线预览产物</span>
+                  <span className="text-[10px]">↗</span>
+                </a>
+              )}
             </div>
-            <pre className="text-emerald-200/90 overflow-x-auto p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+            <pre className="text-emerald-200/90 overflow-x-auto p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 whitespace-pre-wrap">
               {typeof output === "object" ? JSON.stringify(output, null, 2) : String(output)}
             </pre>
           </motion.div>

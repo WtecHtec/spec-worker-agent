@@ -72,7 +72,10 @@ async def process_task(task_id: str, resume_from_step: int, msg_id: str):
             log.info("task_started")
 
             # 4. 通过工厂创建执行器（mock / llm 由 AGENT_MODE 决定）
-            executor = create_executor(task.input, resume_from_step=resume_from_step)
+            task_input = dict(task.input) if isinstance(task.input, dict) else {"content": str(task.input)}
+            task_input["user_id"] = task.user_id
+            task_input["task_id"] = task.id
+            executor = create_executor(task_input, resume_from_step=resume_from_step)
             current_version = checkpoint.version
             last_step = resume_from_step
 
@@ -274,12 +277,19 @@ async def main():
     # 2. 启动后台定时巡检任务（僵尸任务回收 + HITL 超时处理）
     scheduler_task = asyncio.create_task(recovery_scheduler_loop(interval_seconds=10))
 
-    # 3. 启动并发工作协程
+    # 3. 启动跨进程工具缓存失效监听器（接收 API 端 MCP/A2A 配置变动广播）
+    from src.domain.services.tools.manager import user_tool_registry_manager
+    invalidation_listener_task = asyncio.create_task(
+        user_tool_registry_manager.start_invalidation_listener()
+    )
+
+    # 4. 启动并发工作协程
     workers = [asyncio.create_task(worker_loop())
                for _ in range(settings.worker_concurrency)]
 
     await asyncio.gather(*workers)
     scheduler_task.cancel()
+    invalidation_listener_task.cancel()
 
 
 if __name__ == "__main__":

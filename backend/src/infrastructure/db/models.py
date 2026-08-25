@@ -182,3 +182,30 @@ class HitlRequestModel(Base):
         Index("idx_hitl_task_id", "task_id"),
         Index("idx_hitl_status_expires", "status", "expires_at"),
     )
+
+
+# ─────────────────────────────────────────────────────────────
+# ecosystem_configs (MCP & A2A per user persistence)
+# ─────────────────────────────────────────────────────────────
+class EcosystemConfigModel(Base):
+    __tablename__ = "ecosystem_configs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), index=True, nullable=False)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)  # "mcp" or "a2a"
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    transport: Mapped[str] = mapped_column(String(20), default="sse", nullable=False)  # "stdio", "sse", "https"
+    server_url: Mapped[str | None] = mapped_column(String(500))
+    command: Mapped[str | None] = mapped_column(String(200))
+    args: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    namespace: Mapped[str] = mapped_column(String(50), default="custom", nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    cached_tools: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("idx_ecosystem_user_type", "user_id", "type"),
+    )
+
