@@ -1,8 +1,10 @@
 # Antigravity Agent Enterprise Platform
 
-> 一个 vibe coding  **LLM Agent 任务流调度与人机协同企业级平台**。原生具备 **双层智能体编排（Planner + ReAct）、安全隔离沙箱（Sandbox / Go Daemon）、模型上下文协议（MCP）、多智能体协同（A2A）、分层上下文记忆、人机协同（HITL）、分布式断点自愈与 流式渲染**。
+> 一个 vibe coding  **LLM Agent 任务流调度与人机协同企业级平台**。原生具备 **双层智能体编排（Planner + ReAct）、安全隔离沙箱（Sandbox / Go Daemon）、模型上下文协议（MCP）、多智能体协同（A2A）、浏览器CDP、 分层上下文记忆、人机协同（HITL）、分布式断点自愈与 流式渲染**。
 
 ![image](./spec/image.png)
+
+![image](./spec/CDP.png)
 
 ---
 
