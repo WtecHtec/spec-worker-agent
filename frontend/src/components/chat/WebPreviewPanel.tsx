@@ -20,12 +20,16 @@ import {
   Sparkles,
   Package,
   GripVertical,
+  RotateCcw,
+  Download,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useWebContainer } from "@/hooks/useWebContainer";
 import { usePreviewStore } from "@/store/usePreviewStore";
 import { useAuthStore } from "@/store/useAuthStore";
+import { toast } from "@/store/useToastStore";
 import { api, SANDBOX_BASE } from "@/lib/api";
+import { downloadSessionFilesAsZip } from "@/lib/zipHelper";
 
 type ViewportMode = "desktop" | "mobile";
 
@@ -48,6 +52,8 @@ export const WebPreviewPanel: React.FC = () => {
   const [isTerminalExpanded, setIsTerminalExpanded] = useState<boolean>(false);
   const [htmlDocContent, setHtmlDocContent] = useState<string>("");
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [isRestarting, setIsRestarting] = useState<boolean>(false);
+  const [isZipping, setIsZipping] = useState<boolean>(false);
 
   const token = useAuthStore((state) => state.token);
   const terminalBottomRef = useRef<HTMLDivElement>(null);
@@ -203,6 +209,69 @@ export const WebPreviewPanel: React.FC = () => {
     }
   }, [isOpen, isWebContainer, sessionId, token, runProject]);
 
+  const handleRestartWebContainer = async () => {
+    if (!sessionId) return;
+    setIsRestarting(true);
+    try {
+      await stopProject();
+      const res = await api.getSessionFiles(sessionId, token || "");
+      const sessionFiles = res.items || [];
+      const virtualFiles: Array<{ file_path: string; content: string }> = [];
+      for (const f of sessionFiles) {
+        try {
+          const rawSandboxUrl = `${SANDBOX_BASE}/fs/raw?path=${encodeURIComponent(
+            f.file_path.replace(/^\.?\//, "")
+          )}&session_id=${encodeURIComponent(sessionId)}`;
+
+          let content = "";
+          const rawResp = await fetch(rawSandboxUrl);
+          if (rawResp.ok) {
+            content = await rawResp.text();
+          } else {
+            const fileStreamUrl = api.getFilePreviewUrl(sessionId, f.id, token);
+            const fileResp = await fetch(fileStreamUrl);
+            if (fileResp.ok) {
+              content = await fileResp.text();
+            }
+          }
+
+          if (content && !content.startsWith("Error: Failed to stream")) {
+            virtualFiles.push({
+              file_path: f.file_path,
+              content,
+            });
+          }
+        } catch (e) {
+          console.warn(`Failed to fetch content for ${f.file_path}`, e);
+        }
+      }
+
+      if (virtualFiles.length > 0) {
+        await runProject(sessionId, virtualFiles);
+      }
+      toast.success("WebContainer 服务已重启并重新加载工程！", "重启成功");
+    } catch (err: any) {
+      console.error("Failed to restart WebContainer:", err);
+      toast.error(err.message || "重启失败，请重试", "重启异常");
+    } finally {
+      setIsRestarting(false);
+    }
+  };
+
+  const handleDownloadZip = async () => {
+    if (!sessionId) return;
+    setIsZipping(true);
+    try {
+      await downloadSessionFilesAsZip(sessionId, token || "", `${title || "project"}.zip`);
+      toast.success("当前会话产出与工程源码已打包为 ZIP 下载！", "下载完成");
+    } catch (err: any) {
+      console.error("Failed to download zip:", err);
+      toast.error(err.message || "打包源码下载失败", "下载失败");
+    } finally {
+      setIsZipping(false);
+    }
+  };
+
   const handleClose = () => {
     if (isWebContainer) {
       stopProject();
@@ -338,7 +407,38 @@ export const WebPreviewPanel: React.FC = () => {
               </button>
             )}
 
-            {activePreviewUrl && (
+            {/* 重启 WebContainer 服务 */}
+            {isWebContainer && (
+              <button
+                onClick={handleRestartWebContainer}
+                disabled={isRestarting || wcStatus === "booting" || wcStatus === "installing"}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-mono transition-all border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-750 disabled:opacity-50"
+                title="重启 WebContainer 服务"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 ${isRestarting ? "animate-spin text-indigo-400" : "text-amber-400"}`} />
+                <span className="hidden sm:inline">重启</span>
+              </button>
+            )}
+
+            {/* 源码打包下载 ZIP */}
+            {sessionId && (
+              <button
+                onClick={handleDownloadZip}
+                disabled={isZipping}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs font-mono transition-all border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-750 disabled:opacity-50"
+                title="打包下载当前会话所有源码 (ZIP)"
+              >
+                {isZipping ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                ) : (
+                  <Download className="w-3.5 h-3.5 text-emerald-400" />
+                )}
+                <span className="hidden sm:inline">ZIP</span>
+              </button>
+            )}
+
+            {/* 非 WebContainer 模式（纯静态 H5）支持新窗口打开 */}
+            {!isWebContainer && activePreviewUrl && (
               <a
                 href={activePreviewUrl}
                 target="_blank"

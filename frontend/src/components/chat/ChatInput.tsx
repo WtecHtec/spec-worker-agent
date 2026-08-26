@@ -73,8 +73,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const QUICK_PROMPTS = [
-    { title: "📊 销售数据分析", text: "帮我分析一下 Q3 销售数据并生成报告" },
-    { title: "📁 文件异常清洗 (HITL)", text: "请扫描处理上传的数据文件" },
+    { title: "📄 创建文件", text: "请在沙箱中帮我创建一个 utils.py 文件，编写常用日期格式化与字符串处理函数并打印输出。" },
+    { title: "🌐 生成一个 HTML 页面", text: "请帮我生成一个具有精美动态视觉效果的 HTML 页面，包含响应式布局和可交互功能。" },
   ];
 
   return (

@@ -23,8 +23,10 @@ import {
   Server,
   Layers,
   History,
+  Loader2,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { downloadSessionFilesAsZip } from "@/lib/zipHelper";
 import { FileDiffModal } from "./FileDiffModal";
 
 function formatBytes(bytes: number): string {
@@ -73,6 +75,7 @@ export const FileListDrawer: React.FC = () => {
   const [showConfig, setShowConfig] = useState(false);
   const [tempDomain, setTempDomain] = useState(customDomain);
   const [diffModalFile, setDiffModalFile] = useState<SessionFile | null>(null);
+  const [isZipping, setIsZipping] = useState(false);
 
   useEffect(() => {
     initSettings();
@@ -91,6 +94,27 @@ export const FileListDrawer: React.FC = () => {
   const handleRefresh = () => {
     if (currentSessionId && token) {
       fetchFiles(currentSessionId, token, activeCategory);
+    }
+  };
+
+  const handleDownloadAllZip = async () => {
+    if (!currentSessionId) return;
+    setIsZipping(true);
+    try {
+      await downloadSessionFilesAsZip(currentSessionId, token || "", `session-${currentSessionId.slice(0, 8)}-files.zip`);
+      addToast({
+        title: "下载成功",
+        message: "当前会话所有产出文件已成功打包为 ZIP 下载！",
+        type: "success",
+      });
+    } catch (err: any) {
+      addToast({
+        title: "下载失败",
+        message: err.message || "打包文件下载失败",
+        type: "error",
+      });
+    } finally {
+      setIsZipping(false);
     }
   };
 
@@ -165,6 +189,22 @@ export const FileListDrawer: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1">
+            {files.length > 0 && (
+              <button
+                onClick={handleDownloadAllZip}
+                disabled={isZipping}
+                title="一键打包下载当前会话所有文件 (ZIP)"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition-colors disabled:opacity-50"
+              >
+                {isZipping ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5" />
+                )}
+                <span>ZIP 打包</span>
+              </button>
+            )}
+
             <button
               onClick={() => setShowConfig(!showConfig)}
               title="配置访问域名"
