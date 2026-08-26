@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -15,10 +16,11 @@ import (
 )
 
 type ExecRequest struct {
-	ExecID  string `json:"exec_id,omitempty"`
-	Command string `json:"command"`
-	Cwd     string `json:"cwd,omitempty"`
-	Timeout int    `json:"timeout,omitempty"` // 秒数，默认 60s
+	SessionID string `json:"session_id,omitempty"`
+	ExecID    string `json:"exec_id,omitempty"`
+	Command   string `json:"command"`
+	Cwd       string `json:"cwd,omitempty"`
+	Timeout   int    `json:"timeout,omitempty"` // 秒数，默认 60s
 }
 
 type ExecResponse struct {
@@ -61,17 +63,16 @@ func HandleExec(workspaceDir string, pm *process.ProcessManager) http.HandlerFun
 			timeout = time.Duration(req.Timeout) * time.Second
 		}
 
-		workDir := workspaceDir
-		if req.Cwd != "" {
-			safeCwd, err := resolveSafePath(workspaceDir, req.Cwd)
-			if err != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				json.NewEncoder(w).Encode(ExecResponse{IsError: true, Message: err.Error()})
-				return
-			}
-			workDir = safeCwd
+		workDir, err := resolveSafePath(workspaceDir, req.Cwd, req.SessionID)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(ExecResponse{IsError: true, Message: err.Error()})
+			return
 		}
+
+		// 确保会话工作目录存在
+		_ = os.MkdirAll(workDir, 0755)
 
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
@@ -101,7 +102,7 @@ func HandleExec(workspaceDir string, pm *process.ProcessManager) http.HandlerFun
 		pm.Register(req.ExecID, cmd)
 		defer pm.Unregister(req.ExecID)
 
-		err := cmd.Wait()
+		err = cmd.Wait()
 		durationMs := time.Since(startTime).Milliseconds()
 
 		exitCode := 0

@@ -11,6 +11,7 @@ import (
 )
 
 type FileReadRequest struct {
+	SessionID string `json:"session_id,omitempty"`
 	FilePath  string `json:"file_path"`
 	StartLine int    `json:"start_line,omitempty"`
 	EndLine   int    `json:"end_line,omitempty"`
@@ -24,8 +25,9 @@ type FileReadResponse struct {
 }
 
 type FileWriteRequest struct {
-	FilePath string `json:"file_path"`
-	Content  string `json:"content"`
+	SessionID string `json:"session_id,omitempty"`
+	FilePath  string `json:"file_path"`
+	Content   string `json:"content"`
 }
 
 type FileWriteResponse struct {
@@ -35,7 +37,8 @@ type FileWriteResponse struct {
 }
 
 type FileListRequest struct {
-	DirPath string `json:"dir_path,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	DirPath   string `json:"dir_path,omitempty"`
 }
 
 type FileItem struct {
@@ -49,20 +52,26 @@ type FileListResponse struct {
 	Message string     `json:"message,omitempty"`
 }
 
-// 路径防越界校验
-func resolveSafePath(baseWorkspace, relPath string) (string, error) {
+// 路径防越界校验（支持基于 session_id 进行会话目录物理隔离）
+func resolveSafePath(baseWorkspace, relPath string, sessionID ...string) (string, error) {
 	absBase, err := filepath.Abs(baseWorkspace)
 	if err != nil {
 		return "", err
 	}
+
+	targetBase := absBase
+	if len(sessionID) > 0 && strings.TrimSpace(sessionID[0]) != "" {
+		targetBase = filepath.Join(absBase, "sessions", strings.TrimSpace(sessionID[0]))
+	}
+
 	cleanRel := filepath.Clean(relPath)
-	target := filepath.Join(absBase, cleanRel)
+	target := filepath.Join(targetBase, cleanRel)
 	absTarget, err := filepath.Abs(target)
 	if err != nil {
 		return "", err
 	}
 
-	if !strings.HasPrefix(absTarget, absBase) {
+	if !strings.HasPrefix(absTarget, targetBase) {
 		return "", fmt.Errorf("permission denied: path traversal out of workspace [%s]", relPath)
 	}
 	return absTarget, nil
@@ -81,7 +90,7 @@ func HandleFileRead(workspaceDir string) http.HandlerFunc {
 			return
 		}
 
-		targetPath, err := resolveSafePath(workspaceDir, req.FilePath)
+		targetPath, err := resolveSafePath(workspaceDir, req.FilePath, req.SessionID)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
@@ -152,7 +161,7 @@ func HandleFileWrite(workspaceDir string) http.HandlerFunc {
 			return
 		}
 
-		targetPath, err := resolveSafePath(workspaceDir, req.FilePath)
+		targetPath, err := resolveSafePath(workspaceDir, req.FilePath, req.SessionID)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
@@ -193,7 +202,7 @@ func HandleFileList(workspaceDir string) http.HandlerFunc {
 		var req FileListRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 
-		targetDir, err := resolveSafePath(workspaceDir, req.DirPath)
+		targetDir, err := resolveSafePath(workspaceDir, req.DirPath, req.SessionID)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
@@ -245,7 +254,8 @@ func HandleFileRaw(workspaceDir string) http.HandlerFunc {
 			return
 		}
 
-		targetPath, err := resolveSafePath(workspaceDir, filePath)
+		sessionID := r.URL.Query().Get("session_id")
+		targetPath, err := resolveSafePath(workspaceDir, filePath, sessionID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusForbidden)
 			return

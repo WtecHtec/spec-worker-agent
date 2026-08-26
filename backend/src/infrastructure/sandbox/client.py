@@ -33,9 +33,10 @@ class SandboxClient:
         cwd: str = "",
         timeout: int = 60,
         exec_id: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """
-        在沙箱容器中执行 Bash 命令
+        在沙箱容器中执行 Bash 命令（支持会话隔离）
         """
         payload: dict[str, Any] = {
             "command": command,
@@ -44,6 +45,8 @@ class SandboxClient:
         }
         if exec_id:
             payload["exec_id"] = exec_id
+        if session_id:
+            payload["session_id"] = session_id
 
         async with httpx.AsyncClient(timeout=float(timeout + 5)) as client:
             res = await client.post(f"{self.base_url}/exec", json=payload)
@@ -75,13 +78,16 @@ class SandboxClient:
         file_path: str,
         start_line: int | None = None,
         end_line: int | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
-        """从沙箱容器读取文件"""
+        """从沙箱容器读取文件（支持会话隔离）"""
         payload: dict[str, Any] = {"file_path": file_path}
         if start_line is not None:
             payload["start_line"] = start_line
         if end_line is not None:
             payload["end_line"] = end_line
+        if session_id:
+            payload["session_id"] = session_id
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             res = await client.post(f"{self.base_url}/fs/read", json=payload)
@@ -92,12 +98,20 @@ class SandboxClient:
                 }
             return res.json()
 
-    async def write_file(self, file_path: str, content: str) -> dict[str, Any]:
-        """将内容写入沙箱容器"""
-        payload = {
+    async def write_file(
+        self,
+        file_path: str,
+        content: str,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """将内容写入沙箱容器（支持会话隔离）"""
+        payload: dict[str, Any] = {
             "file_path": file_path,
             "content": content,
         }
+        if session_id:
+            payload["session_id"] = session_id
+
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             res = await client.post(f"{self.base_url}/fs/write", json=payload)
             if res.status_code != 200:
@@ -107,9 +121,16 @@ class SandboxClient:
                 }
             return res.json()
 
-    async def list_files(self, dir_path: str = "") -> dict[str, Any]:
-        """列出沙箱工作区目录文件"""
-        payload = {"dir_path": dir_path}
+    async def list_files(
+        self,
+        dir_path: str = "",
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """列出沙箱工作区目录文件（支持会话隔离）"""
+        payload: dict[str, Any] = {"dir_path": dir_path}
+        if session_id:
+            payload["session_id"] = session_id
+
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             res = await client.post(f"{self.base_url}/fs/list", json=payload)
             return res.json() if res.status_code == 200 else {"files": [], "error": res.text}

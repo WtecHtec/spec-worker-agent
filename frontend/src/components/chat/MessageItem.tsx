@@ -18,7 +18,9 @@ import remarkGfm from "remark-gfm";
 import { Message } from "@/types";
 import { StepContainer } from "../steps/StepContainer";
 import { CodeBlock } from "@/components/ui/CodeBlock";
+import { WebPreviewCard } from "./WebPreviewCard";
 import { formatDate } from "@/lib/utils";
+import { SANDBOX_BASE } from "@/lib/api";
 
 interface MessageItemProps {
   message: Message;
@@ -36,6 +38,37 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
 
   // 历史已完成任务默认折叠步骤，按需懒加载
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
+
+  // 提取消息中的 HTML 文件或预览链接
+  const extractWebPreviewInfo = () => {
+    const text = message.content?.text || "";
+    // 1. 直接匹配 http://localhost:5050/fs/raw?path=...
+    const urlMatch = text.match(/(https?:\/\/[^\s\)\"]+\/fs\/(?:raw|preview)\?path=([^\s\)\"]+\.html))/i);
+    if (urlMatch) {
+      const fullUrl = urlMatch[1];
+      const filename = decodeURIComponent(urlMatch[2]);
+      return { previewUrl: fullUrl, fileName: filename };
+    }
+
+    // 2. 匹配相对路径 /fs/raw?path=...html
+    const relMatch = text.match(/(\/fs\/(?:raw|preview)\?path=([^\s\)\"]+\.html))/i);
+    if (relMatch) {
+      const filename = decodeURIComponent(relMatch[2]);
+      return { previewUrl: `${SANDBOX_BASE}${relMatch[1]}`, fileName: filename };
+    }
+
+    // 3. 匹配文本中提到的 .html 文件名 (如 index.html, preview.html, game.html)
+    const htmlFileMatch = text.match(/\b([\w\-_/]+\.html)\b/i);
+    if (htmlFileMatch && (text.includes("写入") || text.includes("生成") || text.includes("创建") || text.includes("预览") || text.includes("HTML") || text.includes("网页") || text.includes("html"))) {
+      const filename = htmlFileMatch[1];
+      const previewUrl = `${SANDBOX_BASE}/fs/raw?path=${encodeURIComponent(filename.replace(/^\.?\//, ""))}`;
+      return { previewUrl, fileName: filename };
+    }
+
+    return null;
+  };
+
+  const webPreview = !isUser ? extractWebPreviewInfo() : null;
 
   if (isUser) {
     return (
@@ -165,11 +198,11 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
                         // 智能补全未带域名的沙箱文件链接或相对路径
                         if (!targetHref.startsWith("http://") && !targetHref.startsWith("https://") && !targetHref.startsWith("mailto:") && !targetHref.startsWith("#")) {
                           if (targetHref.startsWith("/fs/raw") || targetHref.startsWith("/fs/preview")) {
-                            targetHref = `http://localhost:5050${targetHref}`;
+                            targetHref = `${SANDBOX_BASE}${targetHref}`;
                           } else if (targetHref.startsWith("screenshots/") || targetHref.startsWith("images/") || targetHref.endsWith(".png") || targetHref.endsWith(".jpg") || targetHref.endsWith(".jpeg") || targetHref.endsWith(".webp")) {
-                            targetHref = `http://localhost:5050/fs/raw?path=${encodeURIComponent(targetHref.replace(/^\.?\//, ""))}`;
+                            targetHref = `${SANDBOX_BASE}/fs/raw?path=${encodeURIComponent(targetHref.replace(/^\.?\//, ""))}`;
                           } else if (targetHref.startsWith("/")) {
-                            targetHref = `http://localhost:5050/fs/raw?path=${encodeURIComponent(targetHref.replace(/^\//, ""))}`;
+                            targetHref = `${SANDBOX_BASE}/fs/raw?path=${encodeURIComponent(targetHref.replace(/^\//, ""))}`;
                           }
                         }
 
@@ -193,6 +226,15 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
                   </ReactMarkdown>
                 </div>
               ) : null}
+
+              {/* 渲染 Web 实时预览卡片 */}
+              {webPreview && (
+                <WebPreviewCard
+                  fileName={webPreview.fileName}
+                  previewUrl={webPreview.previewUrl}
+                  title={`Web 页面预览: ${webPreview.fileName}`}
+                />
+              )}
 
               {/* 历史任务折叠步骤面板（仅在用户点击时懒加载请求，0 冗余开销） */}
               {taskId && (

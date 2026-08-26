@@ -9,9 +9,19 @@ from src.infrastructure.sandbox.client import get_sandbox_client, SandboxClient
 logger = structlog.get_logger()
 
 
-def _resolve_safe_local_path(base_workspace: str, relative_or_abs_path: str) -> Path:
-    """本地回退模式下的路径安全校验"""
-    workspace = Path(base_workspace).resolve()
+def _get_session_workspace(base_workspace: str, session_id: str | None = None) -> Path:
+    """获取会话级工作空间根目录"""
+    base = Path(base_workspace).resolve()
+    if session_id and session_id.strip():
+        session_ws = base / "sessions" / session_id.strip()
+    else:
+        session_ws = base
+    return session_ws
+
+
+def _resolve_safe_local_path(base_workspace: str, relative_or_abs_path: str, session_id: str | None = None) -> Path:
+    """本地回退模式下的路径安全校验（支持会话隔离）"""
+    workspace = _get_session_workspace(base_workspace, session_id)
     target = (workspace / relative_or_abs_path).resolve()
     if not str(target).startswith(str(workspace)):
         raise PermissionError(f"沙箱安全拦截：路径越界访问拒绝 [{relative_or_abs_path}] 不在工作空间 [{workspace}] 内")
@@ -58,11 +68,15 @@ class SandboxRunCommandTool(BaseTool):
         }
 
     async def execute(self, ctx: dict[str, Any], command: str, cwd: str = ".") -> ToolResult:
+        session_id = ctx.get("session_id")
+
         # 1. 优先使用远程/Docker 独立沙箱
         if self.settings.sandbox_enabled:
             is_alive = await self.sandbox_client.health_check()
             if is_alive:
-                res = await self.sandbox_client.execute_command(command, cwd=cwd, timeout=60)
+                res = await self.sandbox_client.execute_command(
+                    command, cwd=cwd, timeout=60, session_id=session_id
+                )
                 output = res.get("output") or res.get("combined") or "(无输出)"
                 return ToolResult(
                     output=output,
@@ -79,8 +93,9 @@ class SandboxRunCommandTool(BaseTool):
 
         # 2. 本地安全回退模式 (Local Safe Workspace)
         workspace_dir = ctx.get("workspace_dir", self.settings.llm_workspace_dir)
+        session_id = ctx.get("session_id")
         try:
-            work_dir = _resolve_safe_local_path(workspace_dir, cwd)
+            work_dir = _resolve_safe_local_path(workspace_dir, cwd, session_id=session_id)
             work_dir.mkdir(parents=True, exist_ok=True)
 
             proc = await asyncio.create_subprocess_shell(
@@ -184,11 +199,15 @@ class SandboxReadFileTool(BaseTool):
         start_line: int | None = None,
         end_line: int | None = None,
     ) -> ToolResult:
+        session_id = ctx.get("session_id")
+
         # 1. 优先使用远程/Docker 独立沙箱
         if self.settings.sandbox_enabled:
             is_alive = await self.sandbox_client.health_check()
             if is_alive:
-                res = await self.sandbox_client.read_file(file_path, start_line, end_line)
+                res = await self.sandbox_client.read_file(
+                    file_path, start_line, end_line, session_id=session_id
+                )
                 if res.get("is_error", False):
                     return ToolResult(
                         output=f"沙箱读取失败: {res.get('message') or res.get('content')}",
@@ -205,8 +224,9 @@ class SandboxReadFileTool(BaseTool):
 
         # 2. 本地安全回退模式
         workspace_dir = ctx.get("workspace_dir", self.settings.llm_workspace_dir)
+        session_id = ctx.get("session_id")
         try:
-            target_path = _resolve_safe_local_path(workspace_dir, file_path)
+            target_path = _resolve_safe_local_path(workspace_dir, file_path, session_id=session_id)
             if not target_path.exists():
                 return ToolResult(
                     output=f"沙箱错误：文件不存在 [{file_path}]",
@@ -286,13 +306,19 @@ class SandboxWriteFileTool(BaseTool):
         }
 
     async def execute(self, ctx: dict[str, Any], file_path: str, content: str) -> ToolResult:
-        preview_url = f"{self.settings.sandbox_url.rstrip('/')}/fs/raw?path={file_path}"
+        session_id = ctx.get("session_id")
+        if session_id:
+            preview_url = f"{self.settings.sandbox_url.rstrip('/')}/fs/raw?path={file_path}&session_id={session_id}"
+        else:
+            preview_url = f"{self.settings.sandbox_url.rstrip('/')}/fs/raw?path={file_path}"
 
         # 1. 优先使用远程/Docker 独立沙箱
         if self.settings.sandbox_enabled:
             is_alive = await self.sandbox_client.health_check()
             if is_alive:
-                res = await self.sandbox_client.write_file(file_path, content)
+                res = await self.sandbox_client.write_file(
+                    file_path, content, session_id=session_id
+                )
                 if not res.get("success", False):
                     return ToolResult(
                         output=f"沙箱写入失败: {res.get('message')}",
@@ -317,8 +343,9 @@ class SandboxWriteFileTool(BaseTool):
 
         # 2. 本地安全回退模式
         workspace_dir = ctx.get("workspace_dir", self.settings.llm_workspace_dir)
+        session_id = ctx.get("session_id")
         try:
-            target_path = _resolve_safe_local_path(workspace_dir, file_path)
+            target_path = _resolve_safe_local_path(workspace_dir, file_path, session_id=session_id)
             target_path.parent.mkdir(parents=True, exist_ok=True)
 
             with open(target_path, "w", encoding="utf-8") as f:

@@ -1,4 +1,5 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const SANDBOX_BASE = process.env.NEXT_PUBLIC_SANDBOX_URL || "http://localhost:5050";
 
 interface RequestOptions extends RequestInit {
   token?: string | null;

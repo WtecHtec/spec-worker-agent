@@ -206,11 +206,14 @@ class StreamFileContentUseCase:
 
             return sandbox_stream_generator(), file
 
-        # 2. 本地回退工作区流式读取
+        # 2. 本地回退工作区流式读取（优先在 sessions/{session_id} 下检索）
         workspace_dir = Path(self.settings.llm_workspace_dir).resolve()
-        safe_path = (workspace_dir / file.file_path.lstrip("/")).resolve()
-        if not str(safe_path).startswith(str(workspace_dir)) or not safe_path.exists():
-            raise FileNotFoundException(f"Physical file not found: {file.file_path}")
+        safe_path = (workspace_dir / "sessions" / file.session_id / file.file_path.lstrip("/")).resolve()
+        if not (str(safe_path).startswith(str(workspace_dir)) and safe_path.exists()):
+            # 回退兼容全局根目录
+            safe_path = (workspace_dir / file.file_path.lstrip("/")).resolve()
+            if not str(safe_path).startswith(str(workspace_dir)) or not safe_path.exists():
+                raise FileNotFoundException(f"Physical file not found: {file.file_path}")
 
         async def local_stream_generator() -> AsyncGenerator[bytes, None]:
             with open(safe_path, "rb") as f:

@@ -7,6 +7,7 @@ import { Sparkles } from "lucide-react";
 import { useTypewriter } from "@/hooks/useTypewriter";
 import { CodeBlock } from "@/components/ui/CodeBlock";
 import { motion } from "framer-motion";
+import { SANDBOX_BASE } from "@/lib/api";
 
 interface FinalStepProps {
   text: string;
@@ -85,11 +86,11 @@ export const FinalStep: React.FC<FinalStepProps> = React.memo(({
               // 智能补全未带域名的沙箱文件链接或相对路径
               if (!targetHref.startsWith("http://") && !targetHref.startsWith("https://") && !targetHref.startsWith("mailto:") && !targetHref.startsWith("#")) {
                 if (targetHref.startsWith("/fs/raw") || targetHref.startsWith("/fs/preview")) {
-                  targetHref = `http://localhost:5050${targetHref}`;
+                  targetHref = `${SANDBOX_BASE}${targetHref}`;
                 } else if (targetHref.startsWith("screenshots/") || targetHref.startsWith("images/") || targetHref.endsWith(".png") || targetHref.endsWith(".jpg") || targetHref.endsWith(".jpeg") || targetHref.endsWith(".webp")) {
-                  targetHref = `http://localhost:5050/fs/raw?path=${encodeURIComponent(targetHref.replace(/^\.?\//, ""))}`;
+                  targetHref = `${SANDBOX_BASE}/fs/raw?path=${encodeURIComponent(targetHref.replace(/^\.?\//, ""))}`;
                 } else if (targetHref.startsWith("/")) {
-                  targetHref = `http://localhost:5050/fs/raw?path=${encodeURIComponent(targetHref.replace(/^\//, ""))}`;
+                  targetHref = `${SANDBOX_BASE}/fs/raw?path=${encodeURIComponent(targetHref.replace(/^\//, ""))}`;
                 }
               }
 
