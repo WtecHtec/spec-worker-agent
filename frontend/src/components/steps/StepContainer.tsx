@@ -2,6 +2,7 @@
 
 import React, { useEffect } from "react";
 import { useTaskStore } from "@/store/useTaskStore";
+import { useSessionStore } from "@/store/useSessionStore";
 import { useTaskStream } from "@/hooks/useTaskStream";
 import { useAuthStore } from "@/store/useAuthStore";
 import { api } from "@/lib/api";
@@ -11,7 +12,7 @@ import { ToolResultStep } from "./ToolResultStep";
 import { HitlStep } from "./HitlStep";
 import { FinalStep } from "./FinalStep";
 import { PlanStep } from "./PlanStep";
-import { BrainCircuit, Sparkles, Loader2 } from "lucide-react";
+import { BrainCircuit, Sparkles, Loader2, AlertCircle } from "lucide-react";
 
 interface StepContainerProps {
   taskId: string;
@@ -26,6 +27,9 @@ export const StepContainer: React.FC<StepContainerProps> = ({
   const stepsRaw = useTaskStore((state) => state.stepsByTask[taskId]);
   const steps = stepsRaw || [];
   const setSteps = useTaskStore((state) => state.setSteps);
+  const taskStatus = useTaskStore((state) => state.taskStatus[taskId]);
+  const agentMsg = useSessionStore((state) => state.messages.find((m) => m.task_id === taskId));
+  const taskError = agentMsg?.content?.error;
 
   const setHitl = useTaskStore((state) => state.setHitl);
 
@@ -155,8 +159,21 @@ export const StepContainer: React.FC<StepContainerProps> = ({
         }
       })}
 
+      {/* 任务失败且未产出正常 FINAL 步骤时的错误提示卡片 */}
+      {taskStatus === "FAILED" && !hasFinished && (
+        <div className="flex items-start gap-2.5 px-4 py-3 my-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-mono animate-in fade-in">
+          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-rose-200">❌ 任务执行异常中断</div>
+            <p className="text-[11px] text-rose-400/90 mt-1 break-words">
+              {taskError || "后台执行引擎或 LLM 服务调用发生未捕获异常，任务已主动终止。"}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* 步骤推进中的动态 Thinking / Processing 提示 */}
-      {isStreaming && !hasFinished && (
+      {isStreaming && !hasFinished && taskStatus !== "FAILED" && taskStatus !== "CANCELLED" && (
         <div className="flex items-center gap-2 px-3 py-2 my-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 text-xs font-mono backdrop-blur-sm">
           <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
           <span className="text-slate-400">

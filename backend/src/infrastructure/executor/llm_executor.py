@@ -53,14 +53,33 @@ class LlmAgentExecutor(AgentExecutor):
         # 4. 构造 PlanAndExecuteFlow 管道
         flow = PlanAndExecuteFlow(tool_registry=tool_registry)
 
-        # 5. 执行 Flow 并将每一步 yield 给 Worker
-        async for step in flow.run(instruction, ctx):
-            if step.get("type") == "FINAL":
-                self._result = {
-                    "summary": step.get("content", {}).get("text", "任务完成"),
-                    "total_steps": step.get("step_index", 0),
-                }
-            yield step
+        # 5. 执行 Flow 并将每一步 yield 给 Worker（异常兜底保护）
+        try:
+            async for step in flow.run(instruction, ctx):
+                if step.get("type") == "FINAL":
+                    self._result = {
+                        "summary": step.get("content", {}).get("text", "任务完成"),
+                        "total_steps": step.get("step_index", 0),
+                        "error": step.get("content", {}).get("error"),
+                    }
+                yield step
+        except Exception as e:
+            logger.exception("llm_executor_flow_run_failed", error=str(e))
+            error_step = {
+                "step_index": self.resume_from_step + 1,
+                "type": "FINAL",
+                "content": {
+                    "text": f"❌ 任务执行异常中断: {str(e)}",
+                    "error": str(e),
+                },
+                "wait_for_human": False,
+            }
+            self._result = {
+                "summary": f"任务执行异常中断: {str(e)}",
+                "total_steps": error_step["step_index"],
+                "error": str(e),
+            }
+            yield error_step
 
 
     def get_result(self) -> dict[str, Any]:

@@ -257,52 +257,78 @@ async def process_task(task_id: str, resume_from_step: int, msg_id: str):
                 return
 
             result = executor.get_result()
+            # 判断执行结果是否包含致命错误
+            is_task_error = bool(result.get("error"))
+            final_status = "FAILED" if is_task_error else "COMPLETED"
+            now = datetime.now(timezone.utc)
+
             await task_repo.update_status(
-                task_id, "COMPLETED",
+                task_id, final_status,
                 result=result,
-                completed_at=datetime.now(timezone.utc),
+                error=result.get("error"),
+                completed_at=now,
             )
 
-            # 更新 AGENT 占位消息为 done
+            # 更新 AGENT 消息状态
             agent_msg = await msg_repo.get_by_task_id(task_id)
             if agent_msg:
-                final_text = result.get("summary", "任务执行完成。")
+                final_text = result.get("summary", "任务执行完成。" if not is_task_error else "任务执行遇到异常。")
                 await msg_repo.update_message(
                     agent_msg.id,
-                    status="done",
+                    status="failed" if is_task_error else "done",
                     content={
                         **agent_msg.content,
                         "text": final_text,
-                        "task_status": "COMPLETED",
+                        "task_status": final_status,
                         "summary": result.get("summary", ""),
+                        "error": result.get("error"),
                     }
                 )
             await db.commit()
 
+            # 广播事件给前端 SSE
+            event_name = "task_failed" if is_task_error else "task_completed"
             await pubsub.publish(task_id, {
-                "event": "task_completed",
+                "event": event_name,
                 "task_id": task_id,
                 "result": result,
+                "error": result.get("error"),
             })
             await queue.ack(msg_id)
-            log.info("task_completed")
+            log.info("task_finished", status=final_status)
 
         except Exception as e:
             log.exception("task_error", error=str(e))
-            await task_repo.update_status(task_id, "FAILED", error=str(e))
-            agent_msg = await msg_repo.get_by_task_id(task_id)
-            if agent_msg:
-                await msg_repo.update_message(
-                    agent_msg.id,
-                    status="failed",
-                    content={
-                        **agent_msg.content,
-                        "text": f"任务执行出错: {str(e)}",
-                        "task_status": "FAILED",
-                        "error": str(e),
-                    }
-                )
-            await db.commit()
+            now = datetime.now(timezone.utc)
+            try:
+                await task_repo.update_status(task_id, "FAILED", error=str(e), completed_at=now)
+                agent_msg = await msg_repo.get_by_task_id(task_id)
+                if agent_msg:
+                    await msg_repo.update_message(
+                        agent_msg.id,
+                        status="failed",
+                        content={
+                            **agent_msg.content,
+                            "text": f"任务执行中断/异常: {str(e)}",
+                            "task_status": "FAILED",
+                            "error": str(e),
+                        }
+                    )
+                await db.commit()
+            except Exception as db_err:
+                log.error("failed_to_save_task_failure_db", error=str(db_err))
+                await db.rollback()
+
+            # 向前端广播 task_failed 事件
+            try:
+                await pubsub.publish(task_id, {
+                    "event": "task_failed",
+                    "task_id": task_id,
+                    "error": str(e),
+                })
+            except Exception as pub_err:
+                log.error("failed_to_publish_task_failed", error=str(pub_err))
+
             await queue.ack(msg_id)
         finally:
             await lock.release(task_id, WORKER_ID)

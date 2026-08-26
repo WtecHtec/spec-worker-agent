@@ -42,7 +42,22 @@ class PlanAndExecuteFlow:
         step_index = ctx.get("resume_from_step", 0)
 
         # ── 1. Planner 规划阶段 ──
-        plan: PlanModel = await self.planner.create_plan(instruction, ctx)
+        try:
+            plan: PlanModel = await self.planner.create_plan(instruction, ctx)
+        except Exception as e:
+            log.error("planner_create_plan_failed", error=str(e))
+            step_index += 1
+            yield {
+                "step_index": step_index,
+                "type": "FINAL",
+                "content": {
+                    "text": f"❌ 任务规划失败：LLM 服务异常或网络中断 - {str(e)}",
+                    "error": str(e),
+                },
+                "wait_for_human": False,
+            }
+            return
+
         log.info("initial_plan_created", steps_count=len(plan.steps))
 
         # 产出深度思考分析内容（由 Planner LLM 生成的真实分析推理）
@@ -139,10 +154,24 @@ class PlanAndExecuteFlow:
                 }
 
                 # 动态重规划
-                new_plan = await self.planner.replan(
-                    instruction, plan, current_step.id, sub_final_text, ctx
-                )
-                plan = new_plan
+                try:
+                    new_plan = await self.planner.replan(
+                        instruction, plan, current_step.id, sub_final_text, ctx
+                    )
+                    plan = new_plan
+                except Exception as replan_err:
+                    log.error("planner_replan_failed", error=str(replan_err))
+                    step_index += 1
+                    yield {
+                        "step_index": step_index,
+                        "type": "FINAL",
+                        "content": {
+                            "text": f"❌ 任务重规划失败：LLM 服务异常 - {str(replan_err)}",
+                            "error": str(replan_err),
+                        },
+                        "wait_for_human": False,
+                    }
+                    return
 
                 step_index += 1
                 yield {
