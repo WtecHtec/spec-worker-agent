@@ -46,8 +46,9 @@ class SandboxRunCommandTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "在隔离沙箱容器环境中执行指定的 shell 命令（如 python, pytest, ls, git 等）。"
+            "【后端 Linux 容器执行】在隔离沙箱环境中执行系统级 shell 命令（如 python, pytest, git, ls, 批处理脚本等）。"
             "命令以非交互模式运行，具备超时和输出截断防护。"
+            "【重要约束】请勿使用此工具启动常驻前端开发服务（如 npm run dev, vite, npm start 等），前端 Web 应用由客户端 WebContainer 虚拟沙箱自动托管与实时预览。"
         )
 
     @property

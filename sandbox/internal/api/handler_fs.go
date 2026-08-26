@@ -240,6 +240,17 @@ func HandleFileList(workspaceDir string) http.HandlerFunc {
 // HandleFileRaw 提供原生文件二进制/文本流输出，支持浏览器直接 URL 访问预览与下载
 func HandleFileRaw(workspaceDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// 跨域支持 (必须在最前面处理以支持 OPTIONS 预检)
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -263,12 +274,26 @@ func HandleFileRaw(workspaceDir string) http.HandlerFunc {
 
 		info, err := os.Stat(targetPath)
 		if err != nil {
-			if os.IsNotExist(err) {
-				http.Error(w, fmt.Sprintf("file not found: %s", filePath), http.StatusNotFound)
-			} else {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+			// 若按 session_id 未找到文件，尝试回退到工作区根目录检索（兼容历史会话数据）
+			if os.IsNotExist(err) && sessionID != "" {
+				fallbackPath, fallbackErr := resolveSafePath(workspaceDir, filePath)
+				if fallbackErr == nil {
+					if fbInfo, fbErr := os.Stat(fallbackPath); fbErr == nil && !fbInfo.IsDir() {
+						targetPath = fallbackPath
+						info = fbInfo
+						err = nil
+					}
+				}
 			}
-			return
+
+			if err != nil {
+				if os.IsNotExist(err) {
+					http.Error(w, fmt.Sprintf("file not found: %s", filePath), http.StatusNotFound)
+				} else {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				return
+			}
 		}
 
 		if info.IsDir() {
@@ -276,12 +301,26 @@ func HandleFileRaw(workspaceDir string) http.HandlerFunc {
 			return
 		}
 
-		// 跨域支持
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-
 		// 支持强制下载模式
 		if r.URL.Query().Get("download") == "true" || r.URL.Query().Get("download") == "1" {
 			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(targetPath)))
+		}
+
+		// 对代码及文本文件自动适配标准 Content-Type，防止浏览器拒绝预览或强制下载
+		ext := strings.ToLower(filepath.Ext(targetPath))
+		switch ext {
+		case ".jsx", ".tsx", ".ts", ".js", ".mjs", ".cjs":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		case ".json":
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		case ".py", ".sh", ".bash", ".zsh", ".yaml", ".yml", ".md", ".txt", ".env", ".log":
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		case ".css":
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		case ".html", ".htm":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		case ".svg":
+			w.Header().Set("Content-Type", "image/svg+xml")
 		}
 
 		http.ServeFile(w, r, targetPath)

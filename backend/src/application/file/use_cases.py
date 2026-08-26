@@ -190,15 +190,18 @@ class StreamFileContentUseCase:
         if file.user_id != user_id:
             raise ForbiddenAccessException("Access denied")
 
-        # 1. 优先从沙箱服务拉取原始流 (/fs/raw?path=...)
+        # 1. 优先从沙箱服务拉取原始流 (/fs/raw?path=...&session_id=...)
         if self.settings.sandbox_enabled and await self.sandbox_client.health_check():
-            sandbox_raw_url = f"{self.sandbox_client.base_url.rstrip('/')}/fs/raw?path={file.file_path}"
+            sandbox_raw_url = (
+                f"{self.sandbox_client.base_url.rstrip('/')}/fs/raw"
+                f"?path={file.file_path}&session_id={file.session_id}"
+            )
 
             async def sandbox_stream_generator() -> AsyncGenerator[bytes, None]:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     async with client.stream("GET", sandbox_raw_url) as resp:
                         if resp.status_code != 200:
-                            logger.error("failed_to_stream_from_sandbox", status=resp.status_code, path=file.file_path)
+                            logger.error("failed_to_stream_from_sandbox", status=resp.status_code, path=file.file_path, session_id=file.session_id)
                             yield f"Error: Failed to stream file from sandbox (HTTP {resp.status_code})".encode("utf-8")
                             return
                         async for chunk in resp.aiter_bytes(chunk_size=65536):

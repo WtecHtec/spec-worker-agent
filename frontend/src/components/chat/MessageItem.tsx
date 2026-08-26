@@ -21,6 +21,7 @@ import { CodeBlock } from "@/components/ui/CodeBlock";
 import { WebPreviewCard } from "./WebPreviewCard";
 import { formatDate } from "@/lib/utils";
 import { SANDBOX_BASE } from "@/lib/api";
+import { useSessionStore } from "@/store/useSessionStore";
 
 interface MessageItemProps {
   message: Message;
@@ -28,6 +29,8 @@ interface MessageItemProps {
 
 export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) => {
   const isUser = message.role === "USER";
+  const currentSessionId = useSessionStore((state) => state.currentSessionId);
+  const activeSessionId = message.session_id || currentSessionId || undefined;
   const taskId = message.task_id || message.content?.task_id;
   const taskStatus = message.content?.task_status;
   const isStreaming =
@@ -42,19 +45,30 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
   // 提取消息中的 HTML 文件或预览链接
   const extractWebPreviewInfo = () => {
     const text = message.content?.text || "";
+
+    // 0. 优先检测是否生成了前端 NPM 工程 (package.json / React / Vite)
+    if (text.includes("package.json") || (text.includes("vite") && text.includes("React"))) {
+      return {
+        previewUrl: "",
+        fileName: "package.json",
+        isWebContainer: true,
+        title: "React / Vite 前端工程",
+      };
+    }
+
     // 1. 直接匹配 http://localhost:5050/fs/raw?path=...
     const urlMatch = text.match(/(https?:\/\/[^\s\)\"]+\/fs\/(?:raw|preview)\?path=([^\s\)\"]+\.html))/i);
     if (urlMatch) {
       const fullUrl = urlMatch[1];
       const filename = decodeURIComponent(urlMatch[2]);
-      return { previewUrl: fullUrl, fileName: filename };
+      return { previewUrl: fullUrl, fileName: filename, isWebContainer: false, title: `Web 页面: ${filename}` };
     }
 
     // 2. 匹配相对路径 /fs/raw?path=...html
     const relMatch = text.match(/(\/fs\/(?:raw|preview)\?path=([^\s\)\"]+\.html))/i);
     if (relMatch) {
       const filename = decodeURIComponent(relMatch[2]);
-      return { previewUrl: `${SANDBOX_BASE}${relMatch[1]}`, fileName: filename };
+      return { previewUrl: `${SANDBOX_BASE}${relMatch[1]}`, fileName: filename, isWebContainer: false, title: `Web 页面: ${filename}` };
     }
 
     // 3. 匹配文本中提到的 .html 文件名 (如 index.html, preview.html, game.html)
@@ -62,7 +76,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
     if (htmlFileMatch && (text.includes("写入") || text.includes("生成") || text.includes("创建") || text.includes("预览") || text.includes("HTML") || text.includes("网页") || text.includes("html"))) {
       const filename = htmlFileMatch[1];
       const previewUrl = `${SANDBOX_BASE}/fs/raw?path=${encodeURIComponent(filename.replace(/^\.?\//, ""))}`;
-      return { previewUrl, fileName: filename };
+      return { previewUrl, fileName: filename, isWebContainer: false, title: `Web 页面: ${filename}` };
     }
 
     return null;
@@ -232,7 +246,9 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
                 <WebPreviewCard
                   fileName={webPreview.fileName}
                   previewUrl={webPreview.previewUrl}
-                  title={`Web 页面预览: ${webPreview.fileName}`}
+                  title={webPreview.title || `Web 页面预览: ${webPreview.fileName}`}
+                  sessionId={activeSessionId}
+                  isWebContainer={webPreview.isWebContainer}
                 />
               )}
 

@@ -34,6 +34,7 @@ export interface Message {
     [key: string]: any;
   };
   task_id: string | null;
+  session_id?: string | null;
   status: "done" | "streaming" | "failed";
   seq: number;
   created_at: string;
