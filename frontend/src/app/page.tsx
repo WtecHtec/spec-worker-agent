@@ -8,6 +8,7 @@ import { AuthModal } from "@/components/auth/AuthModal";
 import { ToastContainer } from "@/components/ui/ToastContainer";
 import { FileListDrawer } from "@/components/files/FileListDrawer";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
+import { WebPreviewPanel } from "@/components/chat/WebPreviewPanel";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useSessionStore } from "@/store/useSessionStore";
 
@@ -53,10 +54,13 @@ export default function Home() {
       {/* 侧边栏 */}
       <Sidebar />
 
-      {/* 主对话区 */}
+      {/* 主对话区与右侧可拖拽实时预览工作区 */}
       <div className="flex-1 flex flex-col h-full min-w-0">
         <Header />
-        <ChatWindow />
+        <div className="flex-1 flex overflow-hidden min-h-0 relative">
+          <ChatWindow />
+          <WebPreviewPanel />
+        </div>
       </div>
     </main>
   );

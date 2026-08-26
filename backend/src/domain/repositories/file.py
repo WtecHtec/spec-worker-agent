@@ -40,6 +40,45 @@ class IFileRepository(ABC):
         ...
 
     @abstractmethod
+    async def get_by_path(self, session_id: str, file_path: str) -> Optional[SessionFile]:
+        """根据 session_id 与 file_path 查询单个文件"""
+        ...
+
+    @abstractmethod
     async def delete_by_id(self, file_id: str) -> bool:
         """标记删除或物理删除文件"""
+        ...
+
+
+class IFileVersionRepository(ABC):
+    """文件版本数据仓储接口"""
+
+    @abstractmethod
+    async def create(
+        self,
+        file_id: str,
+        session_id: str,
+        version_num: int,
+        file_size: int,
+        task_id: Optional[str] = None,
+        diff_content: Optional[str] = None,
+        storage_key: Optional[str] = None,
+        summary: Optional[str] = None,
+    ) -> "FileVersion":
+        """创建新的文件版本记录"""
+        ...
+
+    @abstractmethod
+    async def list_by_file_id(self, file_id: str) -> list["FileVersion"]:
+        """查询指定文件的所有版本记录（降序）"""
+        ...
+
+    @abstractmethod
+    async def get_by_id(self, version_id: str) -> Optional["FileVersion"]:
+        """获取单个版本详情"""
+        ...
+
+    @abstractmethod
+    async def get_latest_version(self, file_id: str) -> Optional["FileVersion"]:
+        """获取指定文件的最新版本"""
         ...

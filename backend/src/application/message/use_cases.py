@@ -114,10 +114,11 @@ class SendMessageUseCase:
         # 6. 创建 Task 实体 (PENDING)
         task = await self.task_repo.create(
             user_id=user_id,
-            input_data={"type": "text", "content": content, "user_id": user_id},
+            input_data={"type": "text", "content": content, "user_id": user_id, "session_id": session_id},
             session_id=session_id,
             title=content[:50],
             priority=priority,
+            trigger_message_id=user_msg.id,
         )
 
         # 7. 创建 AGENT 占位消息与初始 Checkpoint

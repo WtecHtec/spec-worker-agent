@@ -146,4 +146,10 @@ export const api = {
     const url = `${base}/sessions/${sessionId}/files/${fileId}/download`;
     return token ? `${url}?token=${encodeURIComponent(token)}` : url;
   },
+
+  getFileVersions: (sessionId: string, fileId: string, token: string) =>
+    apiRequest<any[]>(`/sessions/${sessionId}/files/${fileId}/versions`, { token }),
+
+  getFileVersionDetail: (sessionId: string, fileId: string, versionId: string, token: string) =>
+    apiRequest<any>(`/sessions/${sessionId}/files/${fileId}/versions/${versionId}`, { token }),
 };

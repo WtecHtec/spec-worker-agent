@@ -5,8 +5,9 @@ from typing import Optional, AsyncGenerator, Any
 import httpx
 import structlog
 
-from src.domain.entities.models import SessionFile
-from src.domain.repositories.file import IFileRepository
+import difflib
+from src.domain.entities.models import SessionFile, FileVersion
+from src.domain.repositories.file import IFileRepository, IFileVersionRepository
 from src.domain.repositories.session import ISessionRepository
 from src.domain.exceptions import (
     SessionNotFoundException,
@@ -17,6 +18,20 @@ from src.config.settings import get_settings
 from src.infrastructure.sandbox.client import SandboxClient, get_sandbox_client
 
 logger = structlog.get_logger()
+
+
+def calculate_unified_diff(old_content: str, new_content: str, file_path: str = "") -> str:
+    """计算标准 unified diff 补丁文本"""
+    old_lines = old_content.splitlines(keepends=True)
+    new_lines = new_content.splitlines(keepends=True)
+    diff = difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile=f"a/{file_path}",
+        tofile=f"b/{file_path}",
+        lineterm="",
+    )
+    return "".join(diff)
 
 
 def detect_category_and_mime(file_path: str) -> tuple[str, str]:
@@ -127,11 +142,22 @@ class DeleteFileUseCase:
         return await self.file_repo.delete_by_id(file_id)
 
 
-class RecordFileUseCase:
-    """记录/更新产出的文件"""
+MAX_INLINE_DIFF_SIZE = 500 * 1024  # 500 KB 阈值，超过则落盘归档
 
-    def __init__(self, file_repo: IFileRepository):
+
+class RecordFileUseCase:
+    """记录/更新产出的文件并自动追踪版本历史与 Unified Diff（支持大文件快照降级归档）"""
+
+    def __init__(
+        self,
+        file_repo: IFileRepository,
+        version_repo: Optional[IFileVersionRepository] = None,
+        base_storage_dir: Optional[str] = None,
+    ):
         self.file_repo = file_repo
+        self.version_repo = version_repo
+        settings = get_settings()
+        self.base_storage_dir = Path(base_storage_dir or settings.llm_workspace_dir).resolve()
 
     async def execute(
         self,
@@ -144,13 +170,16 @@ class RecordFileUseCase:
         storage_type: str = "sandbox",
         task_id: Optional[str] = None,
         storage_key: Optional[str] = None,
+        old_content: Optional[str] = None,
+        new_content: Optional[str] = None,
+        summary: Optional[str] = None,
     ) -> SessionFile:
         inferred_category, inferred_mime = detect_category_and_mime(file_path)
         final_category = category or inferred_category
         final_mime = mime_type or inferred_mime
         file_name = Path(file_path).name or file_path
 
-        return await self.file_repo.upsert(
+        session_file = await self.file_repo.upsert(
             session_id=session_id,
             user_id=user_id,
             file_path=file_path,
@@ -162,6 +191,107 @@ class RecordFileUseCase:
             task_id=task_id,
             storage_key=storage_key,
         )
+
+        # 自动生成版本与 diff / 快照存储
+        if self.version_repo:
+            try:
+                latest_ver = await self.version_repo.get_latest_version(session_file.id)
+                next_version_num = (latest_ver.version_num + 1) if latest_ver else 1
+
+                diff_text: Optional[str] = None
+                version_storage_key: Optional[str] = None
+
+                # 大文件快照归档策略 (> 500KB)
+                if file_size > MAX_INLINE_DIFF_SIZE or (new_content and len(new_content.encode("utf-8")) > MAX_INLINE_DIFF_SIZE):
+                    # 将大文件快照独立归档至 storage/sessions/{session_id}/.versions/ 避免 DB 膨胀
+                    try:
+                        version_dir = self.base_storage_dir / "sessions" / session_id / ".versions"
+                        version_dir.mkdir(parents=True, exist_ok=True)
+                        snapshot_filename = f"{session_file.id}_v{next_version_num}.snapshot"
+                        snapshot_path = version_dir / snapshot_filename
+                        
+                        if new_content is not None:
+                            snapshot_path.write_text(new_content, encoding="utf-8", errors="replace")
+                        
+                        version_storage_key = f"sessions/{session_id}/.versions/{snapshot_filename}"
+                        diff_text = f"[大文件归档快照：文件大小 {file_size} 字节，内容已安全归档至磁盘存储: {snapshot_filename}]"
+                    except Exception as snapshot_err:
+                        logger.warning("failed_to_save_large_snapshot", error=str(snapshot_err))
+                        diff_text = f"[大文件快照（{file_size} 字节）]"
+                else:
+                    # 小文件计算标准 Unified Diff 存储在 DB
+                    if old_content is not None and new_content is not None:
+                        diff_text = calculate_unified_diff(old_content, new_content, file_path)
+                    elif new_content is not None and next_version_num == 1:
+                        diff_text = calculate_unified_diff("", new_content, file_path)
+
+                await self.version_repo.create(
+                    file_id=session_file.id,
+                    session_id=session_id,
+                    version_num=next_version_num,
+                    file_size=file_size,
+                    task_id=task_id,
+                    diff_content=diff_text,
+                    storage_key=version_storage_key,
+                    summary=summary or f"v{next_version_num} 版本更新",
+                )
+                logger.info(
+                    "file_version_recorded",
+                    file_id=session_file.id,
+                    version_num=next_version_num,
+                    path=file_path,
+                    is_large_file=bool(version_storage_key),
+                )
+            except Exception as e:
+                logger.warning("failed_to_record_file_version", error=str(e), file_id=session_file.id)
+
+        return session_file
+
+
+class ListFileVersionsUseCase:
+    """获取指定文件的历史版本列表"""
+
+    def __init__(
+        self,
+        file_repo: IFileRepository,
+        version_repo: IFileVersionRepository,
+    ):
+        self.file_repo = file_repo
+        self.version_repo = version_repo
+
+    async def execute(self, file_id: str, user_id: str) -> list[FileVersion]:
+        file = await self.file_repo.get_by_id(file_id)
+        if not file:
+            raise FileNotFoundException(file_id)
+        if file.user_id != user_id:
+            raise ForbiddenAccessException("Access denied")
+
+        return await self.version_repo.list_by_file_id(file_id)
+
+
+class GetFileVersionDetailUseCase:
+    """获取指定版本的详细差异与信息"""
+
+    def __init__(
+        self,
+        file_repo: IFileRepository,
+        version_repo: IFileVersionRepository,
+    ):
+        self.file_repo = file_repo
+        self.version_repo = version_repo
+
+    async def execute(self, file_id: str, version_id: str, user_id: str) -> FileVersion:
+        file = await self.file_repo.get_by_id(file_id)
+        if not file:
+            raise FileNotFoundException(file_id)
+        if file.user_id != user_id:
+            raise ForbiddenAccessException("Access denied")
+
+        ver = await self.version_repo.get_by_id(version_id)
+        if not ver or ver.file_id != file_id:
+            raise FileNotFoundException(f"Version not found: {version_id}")
+
+        return ver
 
 
 class StreamFileContentUseCase:

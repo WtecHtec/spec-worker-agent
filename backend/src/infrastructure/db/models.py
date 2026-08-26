@@ -233,12 +233,43 @@ class FileModel(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     session: Mapped["SessionModel"] = relationship(back_populates="files")
+    versions: Mapped[list["FileVersionModel"]] = relationship(
+        back_populates="file",
+        cascade="all, delete-orphan",
+        order_by="desc(FileVersionModel.version_num)",
+    )
 
     __table_args__ = (
         UniqueConstraint("session_id", "file_path", name="uq_session_file_path"),
         Index("idx_files_session_category", "session_id", "category"),
         Index("idx_files_session_created", "session_id", "created_at"),
         Index("idx_files_user_id", "user_id"),
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# file_versions (Version history & unified diffs)
+# ─────────────────────────────────────────────────────────────
+class FileVersionModel(Base):
+    __tablename__ = "file_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    file_id: Mapped[str] = mapped_column(String(36), ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
+    task_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    version_num: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    file_size: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    diff_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    storage_key: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    file: Mapped["FileModel"] = relationship(back_populates="versions")
+
+    __table_args__ = (
+        UniqueConstraint("file_id", "version_num", name="uq_file_version_num"),
+        Index("idx_file_versions_file_id", "file_id"),
+        Index("idx_file_versions_session_id", "session_id"),
     )
 
 

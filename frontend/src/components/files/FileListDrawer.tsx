@@ -22,8 +22,10 @@ import {
   Check,
   Server,
   Layers,
+  History,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { FileDiffModal } from "./FileDiffModal";
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes === 0) return "0 B";
@@ -70,6 +72,7 @@ export const FileListDrawer: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [showConfig, setShowConfig] = useState(false);
   const [tempDomain, setTempDomain] = useState(customDomain);
+  const [diffModalFile, setDiffModalFile] = useState<SessionFile | null>(null);
 
   useEffect(() => {
     initSettings();
@@ -320,6 +323,17 @@ export const FileListDrawer: React.FC = () => {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        setDiffModalFile(file);
+                      }}
+                      title="版本历史与 Diff"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition-colors"
+                    >
+                      <History className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
                         openPreview(file);
                       }}
                       title="预览"
@@ -352,6 +366,17 @@ export const FileListDrawer: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* 版本历史与 Diff 弹窗 */}
+      {diffModalFile && (
+        <FileDiffModal
+          isOpen={!!diffModalFile}
+          onClose={() => setDiffModalFile(null)}
+          sessionId={diffModalFile.session_id}
+          fileId={diffModalFile.id}
+          fileName={diffModalFile.file_name}
+        />
+      )}
     </div>
   );
 };

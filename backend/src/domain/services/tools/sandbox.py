@@ -313,10 +313,20 @@ class SandboxWriteFileTool(BaseTool):
         else:
             preview_url = f"{self.settings.sandbox_url.rstrip('/')}/fs/raw?path={file_path}"
 
+        old_content: str | None = None
+
         # 1. 优先使用远程/Docker 独立沙箱
         if self.settings.sandbox_enabled:
             is_alive = await self.sandbox_client.health_check()
             if is_alive:
+                # 覆写前尝试读取旧内容用于版本快照比对
+                try:
+                    read_res = await self.sandbox_client.read_file(file_path, session_id=session_id)
+                    if read_res and not read_res.get("is_error") and "content" in read_res:
+                        old_content = read_res.get("content")
+                except Exception:
+                    old_content = None
+
                 res = await self.sandbox_client.write_file(
                     file_path, content, session_id=session_id
                 )
@@ -337,6 +347,8 @@ class SandboxWriteFileTool(BaseTool):
                         "bytes": res.get("bytes"),
                         "mode": "docker_sandbox",
                         "preview_url": preview_url,
+                        "old_content": old_content,
+                        "new_content": content,
                     },
                 )
             else:
@@ -347,6 +359,13 @@ class SandboxWriteFileTool(BaseTool):
         session_id = ctx.get("session_id")
         try:
             target_path = _resolve_safe_local_path(workspace_dir, file_path, session_id=session_id)
+            if target_path.exists() and target_path.is_file():
+                try:
+                    with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+                        old_content = f.read()
+                except Exception:
+                    old_content = None
+
             target_path.parent.mkdir(parents=True, exist_ok=True)
 
             with open(target_path, "w", encoding="utf-8") as f:
@@ -363,6 +382,8 @@ class SandboxWriteFileTool(BaseTool):
                     "bytes": len(content.encode("utf-8")),
                     "mode": "local_fallback",
                     "preview_url": preview_url,
+                    "old_content": old_content,
+                    "new_content": content,
                 },
             )
 

@@ -6,11 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.db.models import (
     UserModel, SessionModel, MessageModel,
     TaskModel, TaskStepModel, TaskCheckpointModel, HitlRequestModel,
-    EcosystemConfigModel, FileModel,
+    EcosystemConfigModel, FileModel, FileVersionModel,
 )
 from src.domain.entities.models import (
     User, Session, Message, Task, TaskStep, Checkpoint, HitlRequest,
-    SessionFile,
+    SessionFile, FileVersion,
 )
 from src.domain.repositories.user import IUserRepository
 from src.domain.repositories.session import ISessionRepository, IMessageRepository
@@ -232,9 +232,11 @@ class TaskRepository(ITaskRepository):
         self.db = db
 
     async def create(self, user_id: str, input_data: dict, session_id: str | None = None,
-                     title: str | None = None, priority: int = 0) -> Task:
+                     title: str | None = None, priority: int = 0,
+                     trigger_message_id: str | None = None) -> Task:
         m = TaskModel(user_id=user_id, session_id=session_id,
-                      title=title, input=input_data, priority=priority)
+                      title=title, input=input_data, priority=priority,
+                      trigger_message_id=trigger_message_id)
         self.db.add(m)
         await self.db.flush()
         return to_task(m)
@@ -610,6 +612,17 @@ class FileRepository(IFileRepository):
         m = res.scalar_one_or_none()
         return to_file(m) if m else None
 
+    async def get_by_path(self, session_id: str, file_path: str) -> Optional[SessionFile]:
+        res = await self.db.execute(
+            select(FileModel).where(
+                FileModel.session_id == session_id,
+                FileModel.file_path == file_path,
+                FileModel.is_deleted == False,
+            )
+        )
+        m = res.scalar_one_or_none()
+        return to_file(m) if m else None
+
     async def delete_by_id(self, file_id: str) -> bool:
         stmt = (
             update(FileModel)
@@ -618,5 +631,76 @@ class FileRepository(IFileRepository):
         )
         res = cast(CursorResult, await self.db.execute(stmt))
         return (res.rowcount or 0) > 0
+
+
+def to_file_version(m: FileVersionModel) -> FileVersion:
+    return FileVersion(
+        id=m.id,
+        file_id=m.file_id,
+        session_id=m.session_id,
+        task_id=m.task_id,
+        version_num=m.version_num,
+        file_size=m.file_size,
+        diff_content=m.diff_content,
+        storage_key=m.storage_key,
+        summary=m.summary,
+        created_at=m.created_at,
+    )
+
+
+class FileVersionRepository:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(
+        self,
+        file_id: str,
+        session_id: str,
+        version_num: int,
+        file_size: int,
+        task_id: Optional[str] = None,
+        diff_content: Optional[str] = None,
+        storage_key: Optional[str] = None,
+        summary: Optional[str] = None,
+    ) -> FileVersion:
+        model = FileVersionModel(
+            file_id=file_id,
+            session_id=session_id,
+            task_id=task_id,
+            version_num=version_num,
+            file_size=file_size,
+            diff_content=diff_content,
+            storage_key=storage_key,
+            summary=summary,
+        )
+        self.db.add(model)
+        await self.db.flush()
+        return to_file_version(model)
+
+    async def list_by_file_id(self, file_id: str) -> list[FileVersion]:
+        stmt = (
+            select(FileVersionModel)
+            .where(FileVersionModel.file_id == file_id)
+            .order_by(FileVersionModel.version_num.desc())
+        )
+        res = await self.db.execute(stmt)
+        return [to_file_version(m) for m in res.scalars().all()]
+
+    async def get_by_id(self, version_id: str) -> Optional[FileVersion]:
+        stmt = select(FileVersionModel).where(FileVersionModel.id == version_id)
+        res = await self.db.execute(stmt)
+        m = res.scalar_one_or_none()
+        return to_file_version(m) if m else None
+
+    async def get_latest_version(self, file_id: str) -> Optional[FileVersion]:
+        stmt = (
+            select(FileVersionModel)
+            .where(FileVersionModel.file_id == file_id)
+            .order_by(FileVersionModel.version_num.desc())
+            .limit(1)
+        )
+        res = await self.db.execute(stmt)
+        m = res.scalar_one_or_none()
+        return to_file_version(m) if m else None
 
 

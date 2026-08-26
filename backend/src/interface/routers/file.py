@@ -6,16 +6,30 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infrastructure.db.database import get_db
-from src.infrastructure.db.repositories import FileRepository, SessionRepository
+from src.infrastructure.db.repositories import FileRepository, SessionRepository, FileVersionRepository
 from src.interface.middleware.auth import get_current_user_id
 from src.application.file.use_cases import (
     ListSessionFilesUseCase,
     GetFileMetadataUseCase,
     DeleteFileUseCase,
+    ListFileVersionsUseCase,
+    GetFileVersionDetailUseCase,
     StreamFileContentUseCase,
 )
 
 router = APIRouter(prefix="/sessions/{session_id}/files", tags=["files"])
+
+
+class FileVersionResponse(BaseModel):
+    id: str
+    file_id: str
+    session_id: str
+    task_id: Optional[str] = None
+    version_num: int
+    file_size: int
+    diff_content: Optional[str] = None
+    summary: Optional[str] = None
+    created_at: str
 
 
 class FileItemResponse(BaseModel):
@@ -180,3 +194,59 @@ async def delete_file(
     await use_case.execute(file_id=file_id, user_id=user_id)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{file_id}/versions", response_model=list[FileVersionResponse])
+async def list_file_versions(
+    session_id: str,
+    file_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取指定文件的所有历史版本记录列表（降序）"""
+    use_case = ListFileVersionsUseCase(
+        file_repo=FileRepository(db),
+        version_repo=FileVersionRepository(db),
+    )
+    versions = await use_case.execute(file_id=file_id, user_id=user_id)
+    return [
+        FileVersionResponse(
+            id=v.id,
+            file_id=v.file_id,
+            session_id=v.session_id,
+            task_id=v.task_id,
+            version_num=v.version_num,
+            file_size=v.file_size,
+            diff_content=v.diff_content,
+            summary=v.summary,
+            created_at=v.created_at.isoformat() if v.created_at else "",
+        )
+        for v in versions
+    ]
+
+
+@router.get("/{file_id}/versions/{version_id}", response_model=FileVersionResponse)
+async def get_file_version_detail(
+    session_id: str,
+    file_id: str,
+    version_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取指定版本的详细 Diff 内容与元数据"""
+    use_case = GetFileVersionDetailUseCase(
+        file_repo=FileRepository(db),
+        version_repo=FileVersionRepository(db),
+    )
+    v = await use_case.execute(file_id=file_id, version_id=version_id, user_id=user_id)
+    return FileVersionResponse(
+        id=v.id,
+        file_id=v.file_id,
+        session_id=v.session_id,
+        task_id=v.task_id,
+        version_num=v.version_num,
+        file_size=v.file_size,
+        diff_content=v.diff_content,
+        summary=v.summary,
+        created_at=v.created_at.isoformat() if v.created_at else "",
+    )

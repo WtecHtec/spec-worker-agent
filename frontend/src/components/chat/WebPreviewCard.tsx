@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { Play, ExternalLink, Globe, Sparkles, CheckCircle2, Layers, Package } from "lucide-react";
-import { WebPreviewModal } from "./WebPreviewModal";
+import { Play, ExternalLink, Globe, Sparkles, CheckCircle2, Layers, Package, PanelRight } from "lucide-react";
+import { usePreviewStore } from "@/store/usePreviewStore";
 
 interface WebPreviewCardProps {
   fileName?: string;
@@ -21,9 +21,18 @@ export const WebPreviewCard: React.FC<WebPreviewCardProps> = ({
   sessionId,
   isWebContainer = false,
 }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-
+  const openPreview = usePreviewStore((state) => state.openPreview);
   const isNPMProject = isWebContainer || fileName.includes("package.json");
+
+  const handleOpenPreview = () => {
+    openPreview({
+      fileName,
+      previewUrl,
+      title,
+      sessionId,
+      isWebContainer: isNPMProject,
+    });
+  };
 
   return (
     <>
@@ -72,11 +81,11 @@ export const WebPreviewCard: React.FC<WebPreviewCardProps> = ({
         {/* 底部操作条 */}
         <div className="mt-3.5 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={handleOpenPreview}
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white text-xs font-medium shadow-md shadow-indigo-900/30 transition-all active:scale-[0.98]"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
-            <span>实时预览</span>
+            <span>实时预览 (右侧工作区)</span>
           </button>
 
           {!isNPMProject && previewUrl && (
@@ -93,17 +102,6 @@ export const WebPreviewCard: React.FC<WebPreviewCardProps> = ({
           )}
         </div>
       </div>
-
-      {/* 弹窗 */}
-      <WebPreviewModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        previewUrl={previewUrl}
-        fileName={fileName}
-        title={title}
-        sessionId={sessionId}
-        isWebContainer={isNPMProject}
-      />
     </>
   );
 };

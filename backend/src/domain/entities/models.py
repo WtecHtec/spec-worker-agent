@@ -223,3 +223,17 @@ class SessionFile:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+
+@dataclass
+class FileVersion:
+    id: str
+    file_id: str
+    session_id: str
+    version_num: int
+    file_size: int = 0
+    task_id: Optional[str] = None
+    diff_content: Optional[str] = None
+    storage_key: Optional[str] = None
+    summary: Optional[str] = None
+    created_at: Optional[datetime] = None
+

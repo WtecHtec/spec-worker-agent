@@ -9,7 +9,15 @@ from src.domain.entities.models import Task, TaskStep, Checkpoint
 
 class ITaskRepository(ABC):
     @abstractmethod
-    async def create(self, user_id: str, session_id: Optional[str], input_data: dict, priority: int = 0) -> Task:
+    async def create(
+        self,
+        user_id: str,
+        input_data: dict,
+        session_id: Optional[str] = None,
+        title: Optional[str] = None,
+        priority: int = 0,
+        trigger_message_id: Optional[str] = None,
+    ) -> Task:
         """创建新任务实体并持久化"""
         pass
 

@@ -4,7 +4,8 @@ import React, { useState, useEffect } from "react";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useFileStore } from "@/store/useFileStore";
 import { useAuthStore } from "@/store/useAuthStore";
-import { Wifi, WifiOff, Activity, FolderArchive } from "lucide-react";
+import { usePreviewStore } from "@/store/usePreviewStore";
+import { Wifi, WifiOff, Activity, FolderArchive, Globe } from "lucide-react";
 
 export const Header: React.FC = () => {
   const sessions = useSessionStore((state) => state.sessions);
@@ -15,6 +16,9 @@ export const Header: React.FC = () => {
   const toggleDrawer = useFileStore((state) => state.toggleDrawer);
   const fileTotal = useFileStore((state) => state.total);
   const fetchFiles = useFileStore((state) => state.fetchFiles);
+
+  const isPreviewOpen = usePreviewStore((state) => state.isOpen);
+  const togglePreview = usePreviewStore((state) => state.togglePreview);
 
   const [isOnline, setIsOnline] = useState(true);
 
@@ -54,6 +58,22 @@ export const Header: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-3">
+        {/* Web 实时预览工作区切换按钮 */}
+        {currentSessionId && (
+          <button
+            onClick={togglePreview}
+            title={isPreviewOpen ? "收起实时预览面板" : "展开实时预览面板"}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-all group shadow-sm ${
+              isPreviewOpen
+                ? "bg-indigo-600/20 border-indigo-500/40 text-indigo-300"
+                : "bg-slate-900 hover:bg-slate-800 border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white"
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5 text-indigo-400 group-hover:scale-110 transition-transform" />
+            <span>实时预览</span>
+          </button>
+        )}
+
         {/* 会话产出文件抽屉快捷入口 */}
         {currentSessionId && (
           <button
