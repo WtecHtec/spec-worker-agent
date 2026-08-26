@@ -5,6 +5,7 @@ import {
   webcontainerManager,
   WebContainerStatus,
   VirtualFile,
+  VirtualTreeNode,
 } from "@/lib/webcontainer/webcontainerManager";
 
 export function useWebContainer() {
@@ -14,6 +15,7 @@ export function useWebContainer() {
   const [port, setPort] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSupported, setIsSupported] = useState<boolean>(true);
+  const [fileTree, setFileTree] = useState<VirtualTreeNode[]>([]);
 
   const activeSessionRef = useRef<string | null>(null);
 
@@ -29,6 +31,21 @@ export function useWebContainer() {
     setLogs([]);
   }, []);
 
+  const refreshFileTree = useCallback(async () => {
+    try {
+      const tree = await webcontainerManager.readVirtualTree("/");
+      setFileTree(tree);
+      return tree;
+    } catch (err) {
+      console.warn("Failed to fetch file tree:", err);
+      return [];
+    }
+  }, []);
+
+  const readFile = useCallback(async (filePath: string) => {
+    return await webcontainerManager.readVirtualFile(filePath);
+  }, []);
+
   const runProject = useCallback(
     async (sessionId: string, files: VirtualFile[]) => {
       setError(null);
@@ -40,6 +57,9 @@ export function useWebContainer() {
       await webcontainerManager.startDevServer(sessionId, files, {
         onStatusChange: (newStatus) => {
           setStatus(newStatus);
+          if (newStatus === "ready") {
+            refreshFileTree();
+          }
         },
         onLog: (chunk) => {
           appendLog(chunk);
@@ -47,13 +67,14 @@ export function useWebContainer() {
         onServerReady: (p, url) => {
           setPort(p);
           setPreviewUrl(url);
+          refreshFileTree();
         },
         onError: (err) => {
           setError(err);
         },
       });
     },
-    [appendLog]
+    [appendLog, refreshFileTree]
   );
 
   const stopProject = useCallback(async () => {
@@ -70,6 +91,9 @@ export function useWebContainer() {
     port,
     error,
     isSupported,
+    fileTree,
+    refreshFileTree,
+    readFile,
     runProject,
     stopProject,
     clearLogs,

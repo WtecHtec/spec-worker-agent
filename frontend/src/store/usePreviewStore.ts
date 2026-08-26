@@ -21,6 +21,12 @@ interface PreviewState {
   closePreview: () => void;
   togglePreview: () => void;
   setWidth: (width: number) => void;
+  switchTarget: (target: {
+    title: string;
+    fileName: string;
+    previewUrl: string;
+    isWebContainer: boolean;
+  }) => void;
 }
 
 export const usePreviewStore = create<PreviewState>((set, get) => ({
@@ -49,6 +55,15 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
   togglePreview: () => {
     set((state) => ({ isOpen: !state.isOpen }));
+  },
+
+  switchTarget: (target) => {
+    set({
+      title: target.title,
+      fileName: target.fileName,
+      previewUrl: target.previewUrl,
+      isWebContainer: target.isWebContainer,
+    });
   },
 
   setWidth: (width: number) => {

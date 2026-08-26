@@ -21,6 +21,15 @@ export interface DevServerCallbacks {
   onError?: (error: string) => void;
 }
 
+declare global {
+  // eslint-disable-next-line no-var
+  var __webcontainer_instance__: WebContainer | undefined;
+  // eslint-disable-next-line no-var
+  var __webcontainer_boot_promise__: Promise<WebContainer> | undefined;
+  // eslint-disable-next-line no-var
+  var __webcontainer_manager_instance__: WebContainerManager | undefined;
+}
+
 class WebContainerManager {
   private static instance: WebContainerManager | null = null;
   private webcontainer: WebContainer | null = null;
@@ -34,8 +43,14 @@ class WebContainerManager {
   private constructor() {}
 
   public static getInstance(): WebContainerManager {
+    if (typeof globalThis !== "undefined" && globalThis.__webcontainer_manager_instance__) {
+      return globalThis.__webcontainer_manager_instance__;
+    }
     if (!WebContainerManager.instance) {
       WebContainerManager.instance = new WebContainerManager();
+    }
+    if (typeof globalThis !== "undefined") {
+      globalThis.__webcontainer_manager_instance__ = WebContainerManager.instance;
     }
     return WebContainerManager.instance;
   }
@@ -49,13 +64,21 @@ class WebContainerManager {
   }
 
   /**
-   * 单例启动 WebContainer 虚拟内核
+   * 单例启动 WebContainer 虚拟内核（支持 Next.js HMR 全局单例保护）
    */
   public async getWebContainer(): Promise<WebContainer> {
+    if (typeof globalThis !== "undefined" && globalThis.__webcontainer_instance__) {
+      this.webcontainer = globalThis.__webcontainer_instance__;
+      return this.webcontainer;
+    }
     if (this.webcontainer) {
       return this.webcontainer;
     }
 
+    if (typeof globalThis !== "undefined" && globalThis.__webcontainer_boot_promise__) {
+      this.bootPromise = globalThis.__webcontainer_boot_promise__;
+      return this.bootPromise;
+    }
     if (this.bootPromise) {
       return this.bootPromise;
     }
@@ -70,12 +93,32 @@ class WebContainerManager {
       try {
         const wc = await WebContainer.boot();
         this.webcontainer = wc;
+        if (typeof globalThis !== "undefined") {
+          globalThis.__webcontainer_instance__ = wc;
+        }
         return wc;
       } catch (err: any) {
+        // 如果报错提示已经 boot 过了（例如 Fast Refresh / 热更遗留）
+        if (
+          err?.message?.includes("Only a single WebContainer instance can be booted") ||
+          err?.message?.includes("single WebContainer")
+        ) {
+          if (typeof globalThis !== "undefined" && globalThis.__webcontainer_instance__) {
+            this.webcontainer = globalThis.__webcontainer_instance__;
+            return this.webcontainer;
+          }
+        }
         this.bootPromise = null;
+        if (typeof globalThis !== "undefined") {
+          globalThis.__webcontainer_boot_promise__ = undefined;
+        }
         throw new Error(`WebContainer 启动失败: ${err?.message || String(err)}`);
       }
     })();
+
+    if (typeof globalThis !== "undefined") {
+      globalThis.__webcontainer_boot_promise__ = this.bootPromise;
+    }
 
     return this.bootPromise;
   }
@@ -268,6 +311,92 @@ class WebContainerManager {
   public getServerPort(): number | null {
     return this.serverPort;
   }
+
+  /**
+   * 递归读取 WebContainer 内部文件树（默认忽略 node_modules 与隐藏文件）
+   */
+  public async readVirtualTree(
+    dirPath: string = "/",
+    ignoreList: string[] = ["node_modules", ".git", ".next", ".turbo"]
+  ): Promise<VirtualTreeNode[]> {
+    const wc = await this.getWebContainer();
+    const cleanDir = dirPath.startsWith("/") ? dirPath : `/${dirPath}`;
+
+    try {
+      const entries = await wc.fs.readdir(cleanDir, { withFileTypes: true });
+      const nodes: VirtualTreeNode[] = [];
+
+      for (const entry of entries) {
+        if (ignoreList.includes(entry.name)) {
+          continue;
+        }
+
+        const fullPath = cleanDir === "/" ? `/${entry.name}` : `${cleanDir}/${entry.name}`;
+        const isDir = entry.isDirectory();
+
+        if (isDir) {
+          const children = await this.readVirtualTree(fullPath, ignoreList);
+          nodes.push({
+            name: entry.name,
+            path: fullPath,
+            isDirectory: true,
+            children,
+          });
+        } else {
+          nodes.push({
+            name: entry.name,
+            path: fullPath,
+            isDirectory: false,
+          });
+        }
+      }
+
+      // 文件夹排在前面，同类按名称字典序
+      nodes.sort((a, b) => {
+        if (a.isDirectory === b.isDirectory) {
+          return a.name.localeCompare(b.name);
+        }
+        return a.isDirectory ? -1 : 1;
+      });
+
+      return nodes;
+    } catch (err) {
+      console.warn(`Failed to read virtual dir ${cleanDir}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * 读取 WebContainer 中指定文件的文本内容（若为二进制图片则自动转为 Base64 Data URL）
+   */
+  public async readVirtualFile(filePath: string): Promise<string> {
+    const wc = await this.getWebContainer();
+    const normalized = filePath.startsWith("/") ? filePath : `/${filePath}`;
+    const ext = normalized.split(".").pop()?.toLowerCase() || "";
+    const isBinaryImage = ["png", "jpg", "jpeg", "gif", "webp", "ico", "bmp"].includes(ext);
+
+    if (isBinaryImage) {
+      const buffer = await wc.fs.readFile(normalized);
+      let binary = "";
+      const bytes = new Uint8Array(buffer);
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = typeof window !== "undefined" ? window.btoa(binary) : "";
+      const mime = ext === "jpg" ? "image/jpeg" : ext === "ico" ? "image/x-icon" : `image/${ext}`;
+      return `data:${mime};base64,${base64}`;
+    }
+
+    return await wc.fs.readFile(normalized, "utf-8");
+  }
+}
+
+export interface VirtualTreeNode {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  children?: VirtualTreeNode[];
 }
 
 export const webcontainerManager = WebContainerManager.getInstance();
