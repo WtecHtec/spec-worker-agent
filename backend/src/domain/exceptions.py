@@ -117,3 +117,22 @@ class HitlExpiredException(DomainException):
             code="HITL_EXPIRED",
             status_code=410,
         )
+
+
+class FileNotFoundException(DomainException):
+    def __init__(self, identifier: str):
+        super().__init__(
+            f"File {identifier} not found",
+            code="FILE_NOT_FOUND",
+            status_code=404,
+        )
+
+
+class ForbiddenAccessException(DomainException):
+    def __init__(self, message: str = "Access denied"):
+        super().__init__(
+            message,
+            code="FORBIDDEN",
+            status_code=403,
+        )
+

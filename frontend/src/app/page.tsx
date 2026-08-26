@@ -6,6 +6,8 @@ import { Header } from "@/components/layout/Header";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { ToastContainer } from "@/components/ui/ToastContainer";
+import { FileListDrawer } from "@/components/files/FileListDrawer";
+import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useSessionStore } from "@/store/useSessionStore";
 
@@ -45,6 +47,9 @@ export default function Home() {
   return (
     <main className="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 font-sans antialiased">
       <ToastContainer />
+      <FileListDrawer />
+      <FilePreviewModal />
+
       {/* 侧边栏 */}
       <Sidebar />
 

@@ -55,6 +55,7 @@ class SessionModel(Base):
 
     user: Mapped["UserModel"] = relationship(back_populates="sessions")
     messages: Mapped[list["MessageModel"]] = relationship(back_populates="session")
+    files: Mapped[list["FileModel"]] = relationship(back_populates="session", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_sessions_user_active", "user_id", "last_message_at"),
@@ -208,4 +209,36 @@ class EcosystemConfigModel(Base):
     __table_args__ = (
         Index("idx_ecosystem_user_type", "user_id", "type"),
     )
+
+
+# ─────────────────────────────────────────────────────────────
+# files (Session files & outputs)
+# ─────────────────────────────────────────────────────────────
+class FileModel(Base):
+    __tablename__ = "files"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    session_id: Mapped[str] = mapped_column(String(36), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    task_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    file_size: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), default="application/octet-stream", nullable=False)
+    category: Mapped[str] = mapped_column(String(50), default="document", nullable=False)  # html / image / code / document / data
+    storage_type: Mapped[str] = mapped_column(String(50), default="sandbox", nullable=False)
+    storage_key: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    session: Mapped["SessionModel"] = relationship(back_populates="files")
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "file_path", name="uq_session_file_path"),
+        Index("idx_files_session_category", "session_id", "category"),
+        Index("idx_files_session_created", "session_id", "created_at"),
+        Index("idx_files_user_id", "user_id"),
+    )
+
 

@@ -252,6 +252,7 @@ class BaseAgent(ABC):
                         "output": tool_result.output,
                         "is_error": tool_result.is_error,
                         "duration_ms": duration_ms,
+                        "metadata": tool_result.metadata or {},
                     },
                     "wait_for_human": False,
                 }

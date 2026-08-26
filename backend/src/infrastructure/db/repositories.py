@@ -6,15 +6,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.db.models import (
     UserModel, SessionModel, MessageModel,
     TaskModel, TaskStepModel, TaskCheckpointModel, HitlRequestModel,
-    EcosystemConfigModel,
+    EcosystemConfigModel, FileModel,
 )
 from src.domain.entities.models import (
     User, Session, Message, Task, TaskStep, Checkpoint, HitlRequest,
+    SessionFile,
 )
 from src.domain.repositories.user import IUserRepository
 from src.domain.repositories.session import ISessionRepository, IMessageRepository
 from src.domain.repositories.task import ITaskRepository, ITaskStepRepository, ICheckpointRepository
 from src.domain.repositories.hitl import IHitlRepository
+from src.domain.repositories.file import IFileRepository
 
 
 # ─── Mappers ──────────────────────────────────────────────────
@@ -68,6 +70,25 @@ def to_checkpoint(m: TaskCheckpointModel) -> Checkpoint:
                       context_summary=m.context_summary,
                       task_variables=m.task_variables or {},
                       completed_tool_calls=m.completed_tool_calls or [])
+
+
+def to_file(m: FileModel) -> SessionFile:
+    return SessionFile(
+        id=m.id,
+        session_id=m.session_id,
+        user_id=m.user_id,
+        file_name=m.file_name,
+        file_path=m.file_path,
+        file_size=m.file_size,
+        mime_type=m.mime_type,
+        category=m.category,
+        storage_type=m.storage_type,
+        task_id=m.task_id,
+        storage_key=m.storage_key,
+        is_deleted=m.is_deleted,
+        created_at=m.created_at,
+        updated_at=m.updated_at,
+    )
 
 
 # ─── Repositories ─────────────────────────────────────────────
@@ -496,4 +517,106 @@ class EcosystemConfigRepository:
             await self.db.flush()
             return True
         return False
+
+
+class FileRepository(IFileRepository):
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def upsert(
+        self,
+        session_id: str,
+        user_id: str,
+        file_path: str,
+        file_name: str,
+        file_size: int,
+        mime_type: str,
+        category: str,
+        storage_type: str = "sandbox",
+        task_id: Optional[str] = None,
+        storage_key: Optional[str] = None,
+    ) -> SessionFile:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        stmt = (
+            pg_insert(FileModel)
+            .values(
+                session_id=session_id,
+                user_id=user_id,
+                file_path=file_path,
+                file_name=file_name,
+                file_size=file_size,
+                mime_type=mime_type,
+                category=category,
+                storage_type=storage_type,
+                task_id=task_id,
+                storage_key=storage_key,
+                is_deleted=False,
+            )
+            .on_conflict_do_update(
+                constraint="uq_session_file_path",
+                set_={
+                    "file_name": file_name,
+                    "file_size": file_size,
+                    "mime_type": mime_type,
+                    "category": category,
+                    "storage_type": storage_type,
+                    "task_id": task_id,
+                    "storage_key": storage_key,
+                    "is_deleted": False,
+                    "updated_at": func.now(),
+                },
+            )
+            .returning(FileModel)
+        )
+        result = await self.db.execute(stmt)
+        m = result.scalar_one()
+        return to_file(m)
+
+    async def list_by_session(
+        self,
+        session_id: str,
+        category: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[SessionFile], int]:
+        conditions = [
+            FileModel.session_id == session_id,
+            FileModel.is_deleted == False,
+        ]
+        if category and category != "all":
+            conditions.append(FileModel.category == category)
+
+        # 统计总数
+        count_stmt = select(func.count(FileModel.id)).where(*conditions)
+        count_res = await self.db.execute(count_stmt)
+        total = count_res.scalar() or 0
+
+        # 分页查询
+        query = (
+            select(FileModel)
+            .where(*conditions)
+            .order_by(FileModel.updated_at.desc(), FileModel.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        res = await self.db.execute(query)
+        items = [to_file(m) for m in res.scalars().all()]
+        return items, total
+
+    async def get_by_id(self, file_id: str) -> Optional[SessionFile]:
+        res = await self.db.execute(
+            select(FileModel).where(FileModel.id == file_id, FileModel.is_deleted == False)
+        )
+        m = res.scalar_one_or_none()
+        return to_file(m) if m else None
+
+    async def delete_by_id(self, file_id: str) -> bool:
+        stmt = (
+            update(FileModel)
+            .where(FileModel.id == file_id)
+            .values(is_deleted=True, updated_at=func.now())
+        )
+        res = cast(CursorResult, await self.db.execute(stmt))
+        return (res.rowcount or 0) > 0
+
 

@@ -124,4 +124,25 @@ export const api = {
     const url = `${API_BASE}/tasks/${taskId}/stream?from_step=${fromStep}`;
     return token ? `${url}&token=${encodeURIComponent(token)}` : url;
   },
+
+  // Files
+  getSessionFiles: (sessionId: string, token: string, category?: string) => {
+    const query = category && category !== "all" ? `?category=${category}` : "";
+    return apiRequest<{ total: number; items: any[] }>(`/sessions/${sessionId}/files${query}`, { token });
+  },
+
+  deleteFile: (sessionId: string, fileId: string, token: string) =>
+    apiRequest(`/sessions/${sessionId}/files/${fileId}`, { method: "DELETE", token }),
+
+  getFilePreviewUrl: (sessionId: string, fileId: string, token?: string | null, customHost?: string) => {
+    const base = customHost ? customHost.replace(/\/+$/, "") : API_BASE;
+    const url = `${base}/sessions/${sessionId}/files/${fileId}/preview`;
+    return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+  },
+
+  getFileDownloadUrl: (sessionId: string, fileId: string, token?: string | null, customHost?: string) => {
+    const base = customHost ? customHost.replace(/\/+$/, "") : API_BASE;
+    const url = `${base}/sessions/${sessionId}/files/${fileId}/download`;
+    return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+  },
 };

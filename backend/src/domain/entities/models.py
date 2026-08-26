@@ -204,3 +204,22 @@ class Task:
         current_time = now or datetime.now(timezone.utc)
         delta = (current_time - self.worker_heartbeat).total_seconds()
         return delta > timeout_seconds
+
+
+@dataclass
+class SessionFile:
+    id: str
+    session_id: str
+    user_id: str
+    file_name: str
+    file_path: str
+    file_size: int = 0
+    mime_type: str = "application/octet-stream"
+    category: str = "document"  # html / image / code / document / data
+    storage_type: str = "sandbox"
+    task_id: Optional[str] = None
+    storage_key: Optional[str] = None
+    is_deleted: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+

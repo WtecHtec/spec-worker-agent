@@ -12,8 +12,9 @@ from src.config.settings import get_settings
 from src.infrastructure.db.database import AsyncSessionLocal
 from src.infrastructure.db.models import TaskStepModel
 from src.infrastructure.db.repositories import (
-    TaskRepository, CheckpointRepository, MessageRepository,
+    TaskRepository, CheckpointRepository, MessageRepository, FileRepository,
 )
+from src.application.file.use_cases import detect_category_and_mime
 from src.infrastructure.redis.client import get_redis
 from src.infrastructure.redis.adapters import RedisTaskQueue, RedisPubSub, RedisLock
 from src.infrastructure.executor.factory import create_executor
@@ -141,6 +142,31 @@ async def process_task(task_id: str, resume_from_step: int, msg_id: str):
                     content=content,
                 ).on_conflict_do_nothing(constraint="uq_task_step")
                 await db.execute(stmt)
+
+                # 自动捕获工具产生的文件并入库
+                if step_type == "TOOL_RESULT" and isinstance(content, dict) and not content.get("is_error"):
+                    meta = content.get("metadata") or {}
+                    file_path = meta.get("file_path")
+                    if file_path and task.session_id:
+                        try:
+                            file_repo = FileRepository(db)
+                            file_size = int(meta.get("bytes") or meta.get("file_size") or 0)
+                            cat, mime = detect_category_and_mime(file_path)
+                            file_name = os.path.basename(file_path) or file_path
+                            await file_repo.upsert(
+                                session_id=task.session_id,
+                                user_id=task.user_id,
+                                file_path=file_path,
+                                file_name=file_name,
+                                file_size=file_size,
+                                mime_type=mime,
+                                category=cat,
+                                storage_type=meta.get("mode") or "sandbox",
+                                task_id=task_id,
+                            )
+                            log.info("auto_recorded_session_file", file_path=file_path, session_id=task.session_id)
+                        except Exception as file_err:
+                            log.warning("failed_to_auto_record_file", error=str(file_err), file_path=file_path)
 
                 # 更新 Checkpoint（乐观锁）
                 ok = await ckpt_repo.update(

@@ -88,7 +88,7 @@ app.add_middleware(
 )
 
 
-from src.interface.routers import auth, session, message, task, hitl, ecosystem
+from src.interface.routers import auth, session, message, task, hitl, ecosystem, file
 
 # 3. 注册业务路由
 app.include_router(auth.router)
@@ -97,6 +97,7 @@ app.include_router(message.router)
 app.include_router(task.router)
 app.include_router(hitl.router)
 app.include_router(ecosystem.router)
+app.include_router(file.router)
 
 
 # 4. 健康检查与探针接口
