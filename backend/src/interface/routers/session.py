@@ -4,7 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.db.database import get_db
 from src.infrastructure.db.repositories import SessionRepository
 from src.interface.middleware.auth import get_current_user_id
-from src.application.session.use_cases import CreateSessionUseCase, ListSessionsUseCase
+from src.application.session.use_cases import CreateSessionUseCase, ListSessionsUseCase, DeleteSessionUseCase
+from fastapi import HTTPException
+
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -57,3 +59,19 @@ async def list_sessions(
         )
         for s in sessions
     ]
+
+
+@router.delete("/{session_id}")
+async def delete_session(
+    session_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除会话端点（委托 DeleteSessionUseCase）"""
+    use_case = DeleteSessionUseCase(db=db, session_repo=SessionRepository(db))
+    deleted = await use_case.execute(session_id=session_id, user_id=user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="会话不存在或无权删除")
+    return {"message": "session_deleted", "id": session_id}
+
+

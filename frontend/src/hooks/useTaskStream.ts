@@ -101,16 +101,24 @@ export function useTaskStream(
     es.addEventListener("hitl_created", (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data);
+        const questionText = data.question || data.title || "需要人工确认关键步骤";
+        const optionsList = (data.options && Array.isArray(data.options) && data.options.length > 0)
+          ? data.options
+          : [
+              {"value": "approve", "label": "批准并继续执行"},
+              {"value": "reject", "label": "驳回并要求调整"},
+            ];
         setHitl(taskId, {
           id: data.hitl_id,
           task_id: taskId,
           step_index: data.step_index || latestStepRef.current,
           type: "choice",
-          question: data.question,
-          options: data.options,
+          question: questionText,
+          options: optionsList,
           status: "PENDING",
           expires_at: "",
         });
+
         setTaskStatus(taskId, "WAITING_HUMAN");
         updateMessageByTaskId(taskId, {
           content: { task_status: "WAITING_HUMAN", hitl_question: data.question },

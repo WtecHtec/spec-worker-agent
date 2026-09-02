@@ -22,6 +22,12 @@ class ISessionRepository(ABC):
         """获取用户的所有会话（按最后活跃时间倒序）"""
         pass
 
+    @abstractmethod
+    async def delete(self, session_id: str, user_id: str) -> bool:
+        """删除指定会话及其级联数据"""
+        pass
+
+
 
 class IMessageRepository(ABC):
     @abstractmethod

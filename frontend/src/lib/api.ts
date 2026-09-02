@@ -40,14 +40,20 @@ export async function apiRequest<T = any>(
     ...rest,
   });
 
+  if (response.status === 204) {
+    return null as T;
+  }
+
   const contentType = response.headers.get("content-type");
   let data: any = null;
 
   if (contentType && contentType.includes("application/json")) {
-    data = await response.json();
+    const text = await response.text();
+    data = text ? JSON.parse(text) : null;
   } else {
     data = await response.text();
   }
+
 
   if (!response.ok) {
     // 401 自动清理并登出
@@ -88,6 +94,10 @@ export const api = {
 
   createSession: (title: string, token: string) =>
     apiRequest("/sessions", { method: "POST", body: JSON.stringify({ title }), token }),
+
+  deleteSession: (sessionId: string, token: string) =>
+    apiRequest(`/sessions/${sessionId}`, { method: "DELETE", token }),
+
 
   getSessionMessages: (sessionId: string, token: string, afterSeq: number = 0) =>
     apiRequest(`/sessions/${sessionId}/messages?after_seq=${afterSeq}`, { token }),

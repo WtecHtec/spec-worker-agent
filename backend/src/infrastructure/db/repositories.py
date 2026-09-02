@@ -1,6 +1,7 @@
 from typing import cast, Optional
 from datetime import datetime, timezone
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, delete, func
+
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.infrastructure.db.models import (
@@ -141,9 +142,12 @@ class SessionRepository(ISessionRepository):
         return [to_session(m) for m in result.scalars().all()]
 
     async def get_by_id(self, session_id: str) -> Session | None:
-        result = await self.db.execute(select(SessionModel).where(SessionModel.id == session_id))
+        result = await self.db.execute(
+            select(SessionModel).where(SessionModel.id == session_id, SessionModel.status == "active")
+        )
         m = result.scalar_one_or_none()
         return to_session(m) if m else None
+
 
     async def increment_message_count(self, session_id: str):
         await self.db.execute(
@@ -151,6 +155,26 @@ class SessionRepository(ISessionRepository):
             .where(SessionModel.id == session_id)
             .values(message_count=SessionModel.message_count + 1, last_message_at=func.now())
         )
+
+    async def delete(self, session_id: str, user_id: str) -> bool:
+        result = await self.db.execute(
+            select(SessionModel).where(
+                SessionModel.id == session_id,
+                SessionModel.user_id == user_id,
+                SessionModel.status == "active",
+            )
+        )
+        session_obj = result.scalar_one_or_none()
+        if not session_obj:
+            return False
+
+        # 优雅逻辑删除：直接将 status 标记为 deleted，零外键风险且保留历史审计
+        session_obj.status = "deleted"
+        await self.db.flush()
+        return True
+
+
+
 
 
 class MessageRepository(IMessageRepository):
@@ -234,12 +258,27 @@ class TaskRepository(ITaskRepository):
     async def create(self, user_id: str, input_data: dict, session_id: str | None = None,
                      title: str | None = None, priority: int = 0,
                      trigger_message_id: str | None = None) -> Task:
-        m = TaskModel(user_id=user_id, session_id=session_id,
-                      title=title, input=input_data, priority=priority,
-                      trigger_message_id=trigger_message_id)
+        import uuid
+        task_id = str(uuid.uuid4())
+        safe_input = dict(input_data) if isinstance(input_data, dict) else {"content": str(input_data)}
+        safe_input["task_id"] = task_id
+        safe_input["session_id"] = session_id
+        if "instruction" not in safe_input:
+            safe_input["instruction"] = safe_input.get("content") or title or "执行指定任务"
+
+        m = TaskModel(
+            id=task_id,
+            user_id=user_id,
+            session_id=session_id,
+            title=title,
+            input=safe_input,
+            priority=priority,
+            trigger_message_id=trigger_message_id,
+        )
         self.db.add(m)
         await self.db.flush()
         return to_task(m)
+
 
     async def get_by_id(self, task_id: str) -> Task | None:
         result = await self.db.execute(select(TaskModel).where(TaskModel.id == task_id))

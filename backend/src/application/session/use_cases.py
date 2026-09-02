@@ -29,3 +29,18 @@ class ListSessionsUseCase:
 
     async def execute(self, user_id: str, limit: int = 20) -> list[Session]:
         return await self.session_repo.list_by_user(user_id, limit=limit)
+
+
+class DeleteSessionUseCase:
+    """删除会话用例"""
+
+    def __init__(self, db: AsyncSession, session_repo: ISessionRepository):
+        self.db = db
+        self.session_repo = session_repo
+
+    async def execute(self, session_id: str, user_id: str) -> bool:
+        success = await self.session_repo.delete(session_id=session_id, user_id=user_id)
+        if success:
+            await self.db.commit()
+        return success
+

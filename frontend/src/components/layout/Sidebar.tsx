@@ -17,12 +17,31 @@ export const Sidebar: React.FC = () => {
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const selectSession = useSessionStore((state) => state.selectSession);
   const createSession = useSessionStore((state) => state.createSession);
+  const deleteSession = useSessionStore((state) => state.deleteSession);
   const isLoadingSessions = useSessionStore((state) => state.isLoadingSessions);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isEcosystemOpen, setIsEcosystemOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!token || deletingId) return;
+    if (!confirm("确定要删除该对话及其所有历史执行记录吗？此操作无法撤销。")) return;
+
+    setDeletingId(sessionId);
+    try {
+      await deleteSession(sessionId, token);
+    } catch (err: any) {
+      console.error("Failed to delete session:", err);
+      alert(err.message || "删除会话失败");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const filteredSessions = useMemo(() => {
+
     if (!searchQuery.trim()) return sessions;
     const q = searchQuery.toLowerCase();
     return sessions.filter((s) => (s.title || "未命名会话").toLowerCase().includes(q));
@@ -100,16 +119,28 @@ export const Sidebar: React.FC = () => {
                   exit={{ opacity: 0, x: -8 }}
                   transition={{ duration: 0.2 }}
                   onClick={() => token && selectSession(session.id, token)}
-                  className={`w-full flex items-start gap-3 p-3 rounded-xl text-left transition-all duration-200 ${
+                  className={`w-full flex items-start gap-3 p-3 rounded-xl text-left transition-all duration-200 group ${
                     isSelected
                       ? "bg-indigo-600/15 border border-indigo-500/30 text-slate-100 shadow-sm"
                       : "hover:bg-slate-900/60 border border-transparent text-slate-400 hover:text-slate-200"
                   }`}
+
                 >
                   <MessageSquare className={`w-4 h-4 mt-0.5 shrink-0 ${isSelected ? "text-indigo-400" : "text-slate-500"}`} />
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">
-                      {session.title || "未命名会话"}
+                    <div className="flex items-center justify-between gap-1">
+                      <div className="text-xs font-medium truncate">
+                        {session.title || "未命名会话"}
+                      </div>
+                      <button
+                        type="button"
+                        title="删除会话"
+                        disabled={deletingId === session.id}
+                        onClick={(e) => handleDeleteSession(session.id, e)}
+                        className="opacity-0 group-hover:opacity-100 hover:opacity-100 p-1 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-500/15 transition-all"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                     <div className="flex items-center justify-between mt-1 text-[10px] text-slate-500">
                       <span>{session.message_count || 0} 条消息</span>
@@ -117,6 +148,7 @@ export const Sidebar: React.FC = () => {
                     </div>
                   </div>
                 </motion.button>
+
               );
             })}
           </AnimatePresence>

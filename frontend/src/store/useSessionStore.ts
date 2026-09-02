@@ -13,7 +13,9 @@ interface SessionState {
 
   fetchSessions: (token: string) => Promise<void>;
   createSession: (token: string, title?: string) => Promise<Session>;
+  deleteSession: (sessionId: string, token: string) => Promise<void>;
   selectSession: (sessionId: string, token: string) => Promise<void>;
+
   fetchMessages: (sessionId: string, token: string, silent?: boolean) => Promise<void>;
   sendMessage: (content: string, token: string) => Promise<{ taskId: string; messageId: string }>;
   appendMessage: (message: Message) => void;
@@ -55,7 +57,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     return newSession;
   },
 
+  deleteSession: async (sessionId: string, token: string) => {
+    await api.deleteSession(sessionId, token);
+    const remaining = get().sessions.filter((s) => s.id !== sessionId);
+    const isCurrent = get().currentSessionId === sessionId;
+    const nextSessionId = isCurrent ? (remaining[0]?.id || null) : get().currentSessionId;
+    
+    set({
+      sessions: remaining,
+      currentSessionId: nextSessionId,
+      messages: isCurrent ? [] : get().messages,
+    });
+
+    if (isCurrent && nextSessionId) {
+      await get().selectSession(nextSessionId, token);
+    }
+  },
+
   selectSession: async (sessionId: string, token: string) => {
+
     set({ currentSessionId: sessionId, messages: [] });
     await get().fetchMessages(sessionId, token);
   },

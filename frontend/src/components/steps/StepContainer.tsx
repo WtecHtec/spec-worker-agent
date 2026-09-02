@@ -122,8 +122,8 @@ export const StepContainer: React.FC<StepContainerProps> = ({
               <ToolCallStep
                 key={step.step_index}
                 stepIndex={step.step_index}
-                toolName={step.content.tool_name || "unknown_tool"}
-                args={step.content.arguments || {}}
+                toolName={step.content.tool_name || step.content.name || step.content.tool || "工具调用"}
+                args={step.content.arguments || step.content.args || {}}
               />
             );
           case "TOOL_RESULT":
@@ -131,21 +131,42 @@ export const StepContainer: React.FC<StepContainerProps> = ({
               <ToolResultStep
                 key={step.step_index}
                 stepIndex={step.step_index}
-                toolName={step.content.tool_name || "tool"}
+                toolName={step.content.tool_name || step.content.name || step.content.tool || "工具结果"}
                 output={step.content.output}
                 durationMs={step.content.duration_ms}
               />
             );
+
           case "HITL_REQUEST":
             return (
               <HitlStep
                 key={step.step_index}
                 taskId={taskId}
                 stepIndex={step.step_index}
-                question={step.content.question || "需要人工决策"}
+                question={step.content.question || step.content.title || "需要人工决策"}
+                detail={step.content.detail || step.content.step_detail}
                 options={step.content.options}
               />
             );
+
+          case "USER_DECISION":
+            return (
+              <div
+                key={step.step_index}
+                className="my-3 rounded-xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/40 to-slate-900/60 p-4 shadow-lg backdrop-blur-md"
+              >
+                <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-indigo-300">
+                  <span className="p-1 rounded-md bg-indigo-500/20 border border-indigo-500/30">👤</span>
+                  <span>人机协同决策反馈 (步骤 #{step.step_index})</span>
+                </div>
+                <div className="text-xs text-slate-200 whitespace-pre-wrap leading-relaxed font-mono bg-slate-950/60 p-3 rounded-lg border border-slate-800/80">
+                  {step.content.text || `用户决策：${step.content.decision}`}
+                </div>
+              </div>
+            );
+
+
+
           case "FINAL":
             return (
               <FinalStep
