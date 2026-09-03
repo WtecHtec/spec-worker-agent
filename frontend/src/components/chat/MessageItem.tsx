@@ -19,16 +19,37 @@ import { Message } from "@/types";
 import { StepContainer } from "../steps/StepContainer";
 import { CodeBlock } from "@/components/ui/CodeBlock";
 import { WebPreviewCard } from "./WebPreviewCard";
+import { HitlFormCard, FormField } from "./HitlFormCard";
 import { formatDate } from "@/lib/utils";
 import { SANDBOX_BASE } from "@/lib/api";
 import { useSessionStore } from "@/store/useSessionStore";
+import { normalizeRole, extractMessageText } from "@/lib/messageNormalizer";
+
+export interface LangGraphMessage {
+  id?: string;
+  type?: string;     // "human" | "ai" | "tool" | "system"
+  role?: string;     // 兼容旧格式 "USER" | "AGENT"
+  content?: any;
+  tool_calls?: Array<{
+    id?: string;
+    name: string;
+    args: any;
+  }>;
+  status?: string;
+  created_at?: string;
+  [key: string]: any;
+}
 
 interface MessageItemProps {
-  message: Message;
+  message: Message | LangGraphMessage | any;
 }
 
 export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) => {
-  const isUser = message.role === "USER";
+  // 工业级角色归一化：彻底抹平大小写与类名差异
+  const role = normalizeRole(message);
+  const isUser = role === "user";
+  const isTool = role === "tool";
+
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const activeSessionId = message.session_id || currentSessionId || undefined;
   const taskId = message.task_id || message.content?.task_id;
@@ -42,9 +63,12 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
   // 历史已完成任务默认折叠步骤，按需懒加载
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
 
+  // 工业级文本提取函数：支持字符串、递归数组、对象
+  const messageText = extractMessageText(message);
+
   // 提取消息中的 HTML 文件或预览链接
   const extractWebPreviewInfo = () => {
-    const text = message.content?.text || "";
+    const text = messageText;
 
     // 0. 优先检测是否生成了前端 NPM 工程 (package.json / React / Vite)
     if (text.includes("package.json") || (text.includes("vite") && text.includes("React"))) {
@@ -82,17 +106,67 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
     return null;
   };
 
+  // 提取消息中的人机协同 (HITL) 表单结构（仅在包含合法结构化表单时解析，杜绝普通文本关键词误判）
+  const extractHitlInfo = () => {
+    const text = messageText;
+    if (!text || !text.includes('"form_fields"')) {
+      return null;
+    }
+
+    try {
+      // 严格匹配 JSON 格式的表单定义
+      const jsonMatch = text.match(/(\{[\s\S]*"form_fields"[\s\S]*\})/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[1]);
+        if (Array.isArray(parsed.form_fields) && parsed.form_fields.length > 0) {
+          return {
+            title: parsed.title || "人机协同交互确认",
+            description: parsed.description || "",
+            riskLevel: parsed.risk_level || "medium",
+            formFields: parsed.form_fields,
+          };
+        }
+      }
+    } catch (_) {}
+
+    return null;
+  };
+
   const webPreview = !isUser ? extractWebPreviewInfo() : null;
+  const hitlInfo = !isUser ? extractHitlInfo() : null;
+
+  const handleHitlSubmit = (formData: Record<string, any>) => {
+    const lines = Object.entries(formData).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`);
+    const replyText = `[人机协同审批结果提交]\n${lines.join("\n")}`;
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("submit_hitl_response", { detail: replyText }));
+    }
+  };
+
+  const formattedTime = formatDate(message.created_at || message.response_metadata?.created_at);
+
+  if (isTool) {
+    return (
+      <div className="flex justify-start my-2 max-w-[85%] animate-in fade-in duration-200">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] text-slate-400 font-mono">
+          <span className="text-emerald-400 font-semibold">⚡ 工具产出:</span>
+          <span className="truncate max-w-lg text-slate-300">{messageText}</span>
+        </div>
+      </div>
+    );
+  }
 
   if (isUser) {
     return (
       <div className="flex justify-end my-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
         <div className="flex gap-3 max-w-[80%] items-start">
           <div className="rounded-2xl rounded-tr-sm bg-gradient-to-r from-indigo-600 to-indigo-700 px-4 py-3 text-white text-sm shadow-md shadow-indigo-950/30">
-            <p className="whitespace-pre-wrap leading-relaxed">{message.content.text}</p>
-            <div className="mt-1 text-[10px] text-indigo-200/80 text-right font-mono">
-              {formatDate(message.created_at)}
-            </div>
+            <p className="whitespace-pre-wrap leading-relaxed">{messageText}</p>
+            {formattedTime && (
+              <div className="mt-1 text-[10px] text-indigo-200/80 text-right font-mono">
+                {formattedTime}
+              </div>
+            )}
           </div>
           <div className="w-8 h-8 rounded-full bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300 shrink-0">
             <User className="w-4 h-4" />
@@ -146,8 +220,78 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
               )}
             </div>
 
-            <span className="text-[10px] text-slate-500 font-mono">{formatDate(message.created_at)}</span>
+            {formattedTime && (
+              <span className="text-[10px] text-slate-500 font-mono">{formattedTime}</span>
+            )}
           </div>
+
+          {/* 整合工具步骤折叠栏（将 tool 产出与 tool_calls 步骤无缝缝合） */}
+          {message.steps && Array.isArray(message.steps) && message.steps.length > 0 && (
+            <div className="mb-3 rounded-xl border border-slate-800/80 bg-slate-950/60 overflow-hidden text-xs">
+              <button
+                type="button"
+                onClick={() => setIsDetailsExpanded((prev) => !prev)}
+                className="w-full flex items-center justify-between px-3 py-2 text-slate-300 hover:bg-slate-900/50 transition-colors font-mono"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                  <span className="font-semibold text-indigo-300">
+                    已执行 {message.steps.length} 个工具调用步骤
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                  <span>{isDetailsExpanded ? "收起" : "展开详情"}</span>
+                  {isDetailsExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </div>
+              </button>
+
+              {isDetailsExpanded && (
+                <div className="px-3 pb-3 space-y-2 border-t border-slate-800/60 pt-2 font-mono">
+                  {message.steps.map((step: any, idx: number) => (
+                    <div key={step.toolCallId || idx} className="rounded-lg bg-slate-900/90 border border-slate-800 p-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-indigo-400 text-[11px]">🛠️ {step.toolName}</span>
+                        <span className="text-[10px] text-emerald-400 font-semibold">✓ 成功执行</span>
+                      </div>
+                      {step.args && Object.keys(step.args).length > 0 && (
+                        <div className="text-[10px] text-slate-400 bg-slate-950/70 p-1.5 rounded border border-slate-800/60 overflow-x-auto">
+                          <span className="text-slate-500 block mb-0.5">调用入参：</span>
+                          {JSON.stringify(step.args, null, 2)}
+                        </div>
+                      )}
+                      {step.output && (
+                        <div className="text-[10px] text-slate-300 bg-slate-950/90 p-1.5 rounded border border-slate-800/80 max-h-36 overflow-y-auto whitespace-pre-wrap">
+                          <span className="text-emerald-500 font-semibold block mb-0.5">执行产出：</span>
+                          {step.output}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* LangGraph 独立 tool_calls 工具执行卡片（无关联 steps 时的降级呈现） */}
+          {(!message.steps || message.steps.length === 0) && message.tool_calls && Array.isArray(message.tool_calls) && message.tool_calls.length > 0 && (
+            <div className="mb-2 space-y-1">
+              {message.tool_calls.map((tc: any, idx: number) => (
+                <div
+                  key={tc.id || idx}
+                  className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-indigo-950/40 border border-indigo-500/20 text-xs text-indigo-300 font-mono"
+                >
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    <span className="font-semibold text-indigo-200">🛠️ {tc.name}</span>
+                    <span className="text-slate-400 text-[11px] truncate max-w-sm">
+                      {tc.args ? JSON.stringify(tc.args) : ""}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-indigo-400/80 shrink-0 ml-2">执行完毕</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* 渲染内容：区分流式中 vs 历史已完成 */}
           {isStreaming && taskId ? (
@@ -157,7 +301,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
             // 2. 历史消息：Markdown 结构化渲染正文回复 + 折叠懒加载步骤详情
             <div className="space-y-3">
               {/* 正文 Markdown 渲染 */}
-              {message.content?.text ? (
+              {messageText ? (
                 <div className="prose prose-invert prose-sm max-w-none text-slate-100 text-sm leading-relaxed font-sans">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
@@ -236,7 +380,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
                       },
                     }}
                   >
-                    {message.content.text}
+                    {messageText}
                   </ReactMarkdown>
                 </div>
               ) : null}
@@ -249,6 +393,17 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
                   title={webPreview.title || `Web 页面预览: ${webPreview.fileName}`}
                   sessionId={activeSessionId}
                   isWebContainer={webPreview.isWebContainer}
+                />
+              )}
+
+              {/* 渲染 HITL 人机协同表单卡片 */}
+              {hitlInfo && (
+                <HitlFormCard
+                  title={hitlInfo.title}
+                  description={hitlInfo.description}
+                  riskLevel={hitlInfo.riskLevel}
+                  formFields={hitlInfo.formFields}
+                  onSubmit={handleHitlSubmit}
                 />
               )}
 

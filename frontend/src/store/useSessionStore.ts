@@ -79,22 +79,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  selectSession: async (sessionId: string, token: string) => {
-
-    set({ currentSessionId: sessionId, messages: [] });
-    await get().fetchMessages(sessionId, token);
+  selectSession: async (sessionId: string, _token?: string) => {
+    set({ currentSessionId: sessionId });
   },
 
-  fetchMessages: async (sessionId: string, token: string, silent: boolean = false) => {
-    if (!silent) {
-      set({ isLoadingMessages: true, error: null });
-    }
-    try {
-      const data = await api.getSessionMessages(sessionId, token);
-      set({ messages: data, isLoadingMessages: false });
-    } catch (err: any) {
-      set({ isLoadingMessages: false, error: err.message });
-    }
+  fetchMessages: async (_sessionId: string, _token: string, _silent: boolean = false) => {
+    // 纯 LangGraph 架构下，消息直接由 Thread 状态驱动，不再强拉业务 messages 表
+    set({ isLoadingMessages: false, error: null });
   },
 
   sendMessage: async (content: string, token: string) => {

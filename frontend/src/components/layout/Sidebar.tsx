@@ -111,20 +111,26 @@ export const Sidebar: React.FC = () => {
             {filteredSessions.map((session) => {
               const isSelected = session.id === currentSessionId;
               return (
-                <motion.button
+                <motion.div
                   key={session.id}
                   layout
                   initial={{ opacity: 0, x: -8 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -8 }}
                   transition={{ duration: 0.2 }}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => token && selectSession(session.id, token)}
-                  className={`w-full flex items-start gap-3 p-3 rounded-xl text-left transition-all duration-200 group ${
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      token && selectSession(session.id, token);
+                    }
+                  }}
+                  className={`w-full flex items-start gap-3 p-3 rounded-xl text-left transition-all duration-200 group cursor-pointer ${
                     isSelected
                       ? "bg-indigo-600/15 border border-indigo-500/30 text-slate-100 shadow-sm"
                       : "hover:bg-slate-900/60 border border-transparent text-slate-400 hover:text-slate-200"
                   }`}
-
                 >
                   <MessageSquare className={`w-4 h-4 mt-0.5 shrink-0 ${isSelected ? "text-indigo-400" : "text-slate-500"}`} />
                   <div className="flex-1 min-w-0">
@@ -139,16 +145,18 @@ export const Sidebar: React.FC = () => {
                         onClick={(e) => handleDeleteSession(session.id, e)}
                         className="opacity-0 group-hover:opacity-100 hover:opacity-100 p-1 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-500/15 transition-all"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        {deletingId === session.id ? (
+                          <div className="w-3 h-3 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3" />
+                        )}
                       </button>
                     </div>
-                    <div className="flex items-center justify-between mt-1 text-[10px] text-slate-500">
-                      <span>{session.message_count || 0} 条消息</span>
-                      <span>{formatDate(session.created_at)}</span>
+                    <div className="text-[10px] text-slate-600 mt-1 font-mono">
+                      {formatDate(session.created_at)}
                     </div>
                   </div>
-                </motion.button>
-
+                </motion.div>
               );
             })}
           </AnimatePresence>

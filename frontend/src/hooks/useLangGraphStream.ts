@@ -12,8 +12,7 @@
 import { useRef, useCallback } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import type { ThreadState } from "@langchain/langgraph-sdk";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE } from "@/lib/api";
 
 // LangGraph 消息格式（SDK 内部格式）
 type LGMessage = {
@@ -146,6 +145,27 @@ export function useLangGraphStream({
     activeRunIdRef.current = null;
   }, [stream, threadId, token]);
 
+  /**
+   * 响应并恢复 HITL 中断（传递人类审批/表单填写决策）
+   */
+  const resume = useCallback(
+    (decision: any) => {
+      // 触发 SDK 官方 command.resume
+      (stream as any).submit(null, {
+        command: {
+          resume: decision,
+        },
+      });
+    },
+    [stream]
+  );
+
+  // 提取官方 LangGraph HITL interrupt 数据与操作请求
+  const interruptData: any = (stream.interrupt as any)?.value || stream.interrupt;
+  const actionRequests: any[] = Array.isArray(interruptData?.action_requests)
+    ? interruptData.action_requests
+    : [];
+
   return {
     /** 当前 LLM 推理是否正在进行 */
     isLoading: stream.isLoading,
@@ -153,6 +173,12 @@ export function useLangGraphStream({
     messages: stream.messages,
     /** 发送用户消息 */
     submit,
+    /** 恢复 HITL 中断 */
+    resume,
+    /** 当前中断信息 */
+    interrupt: stream.interrupt,
+    /** 解析出的待审批请求列表 */
+    actionRequests,
     /** 停止生成（前端 + 服务端双重终止） */
     cancel,
     /** 当前 run_id */

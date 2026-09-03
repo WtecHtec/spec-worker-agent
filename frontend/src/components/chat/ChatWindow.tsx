@@ -1,123 +1,62 @@
 "use client";
 
-import React, { useRef, useEffect, useCallback } from "react";
+import React, { useRef, useEffect, useCallback, useState } from "react";
 import { MessageItem } from "./MessageItem";
 import { ChatInput } from "./ChatInput";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLangGraphStream } from "@/hooks/useLangGraphStream";
 import { Bot } from "lucide-react";
-import { toast } from "@/store/useToastStore";
-import { Message } from "@/types";
+import { HitlFormCard } from "./HitlFormCard";
 
-
-// 生成本地临时 ID（用于乐观渲染占位）
-const tempId = () => `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-
-/** 从 LangGraph message（any）中提取纯文本 */
-function extractText(msg: any): string {
-  if (!msg) return "";
-  if (typeof msg.content === "string") return msg.content;
-  if (Array.isArray(msg.content)) {
-    return msg.content
-      .map((c: any) => (typeof c === "string" ? c : c?.text ?? ""))
-      .join("");
-  }
-  return "";
-}
-
-/** 判断是否为 AI 回复消息（兼容 ai / assistant / AIMessage / AIMessageChunk） */
-function isAiMessage(msg: any): boolean {
-  if (!msg) return false;
-  const t = String(msg.type || msg.role || "").toLowerCase();
-  return t === "ai" || t === "assistant" || t === "aimessage" || t === "aimessagechunk";
-}
+import { groupMessagesIntoTurns } from "@/lib/messageNormalizer";
 
 export const ChatWindow: React.FC = () => {
   const token = useAuthStore((state) => state.token);
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const storeMessages = useSessionStore((state) => state.messages);
-  const isLoadingMessages = useSessionStore((state) => state.isLoadingMessages);
   const createSession = useSessionStore((state) => state.createSession);
-  const appendMessage = useSessionStore((state) => state.appendMessage);
-  const updateMessage = useSessionStore((state) => state.updateMessage);
-  const fetchMessages = useSessionStore((state) => state.fetchMessages);
   const setCurrentRunId = useSessionStore((state) => state.setCurrentRunId);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const streamingMsgIdRef = useRef<string | null>(null);
+  const [submittedRequestIds, setSubmittedRequestIds] = useState<Record<string, boolean>>({});
 
-  // 自动吸底滚动
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [storeMessages]);
-
-  const { isLoading, submit, cancel, messages: streamMessages } = useLangGraphStream({
+  // 全面拥抱 LangGraph 原生 useStream：以 Thread 消息流为全局单一可信源
+  const {
+    isLoading,
+    submit,
+    resume,
+    actionRequests,
+    cancel,
+    messages,
+  } = useLangGraphStream({
     threadId: currentSessionId,
     token,
-
     onRunCreated: useCallback((runId: string) => {
       setCurrentRunId(runId);
     }, [setCurrentRunId]),
-
-    onMessage: useCallback((lgMessages: any[]) => {
-      const msgId = streamingMsgIdRef.current;
-      if (!msgId || !Array.isArray(lgMessages) || lgMessages.length === 0) return;
-      const aiMsg = [...lgMessages].reverse().find(isAiMessage);
-      if (!aiMsg) return;
-      const text = extractText(aiMsg);
-      if (text) {
-        updateMessage(msgId, { content: { text }, status: "streaming" });
-      }
-    }, [updateMessage]),
-
-    // 流结束：将占位消息标记为 done，后台同步数据库
-    onFinish: useCallback((lgMessages: any[]) => {
-      const msgId = streamingMsgIdRef.current;
-      if (msgId) {
-        const aiMsg = Array.isArray(lgMessages)
-          ? [...lgMessages].reverse().find(isAiMessage)
-          : null;
-        const finalText = aiMsg ? extractText(aiMsg) : "";
-        if (finalText) {
-          updateMessage(msgId, { content: { text: finalText }, status: "done" });
-        } else {
-          updateMessage(msgId, { status: "done" });
-        }
-        streamingMsgIdRef.current = null;
-        setCurrentRunId(null);
-      }
-      const sid = useSessionStore.getState().currentSessionId;
-      if (sid && token) fetchMessages(sid, token, true);
-    }, [updateMessage, fetchMessages, setCurrentRunId, token]),
-
-    onError: useCallback((err: Error) => {
-      const msgId = streamingMsgIdRef.current;
-      if (msgId) {
-        updateMessage(msgId, { content: { text: "⚠️ 请求出错，请重试。" }, status: "failed" });
-        streamingMsgIdRef.current = null;
-      }
-      toast.error(err.message || "LLM 请求失败", "错误");
-    }, [updateMessage]),
+    onFinish: useCallback(() => {
+      setCurrentRunId(null);
+    }, [setCurrentRunId]),
   });
 
-  // 监听 SDK 原生响应式 messages 状态（双重保障）
+  // 按任务轮次聚合后的消息列表：工具调用、工具返回与大模型回复一体化呈现
+  const renderedTurns = React.useMemo(() => groupMessagesIntoTurns(messages), [messages]);
+
+  // 自动吸底滚动（内容变动时 auto 滚动，杜绝 smooth 频繁计算掉帧）
   useEffect(() => {
-    const msgId = streamingMsgIdRef.current;
-    if (!msgId || !Array.isArray(streamMessages) || streamMessages.length === 0) return;
-    const aiMsg = [...streamMessages].reverse().find(isAiMessage);
-    if (aiMsg) {
-      const text = extractText(aiMsg);
-      if (text) {
-        updateMessage(msgId, { content: { text }, status: "streaming" });
-      }
-    }
-  }, [streamMessages, updateMessage]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+  }, [renderedTurns]);
 
-  const handleSend = async (text: string) => {
-    if (!token || isLoading) return;
+  // 会话切换时重置已提交审批记录
+  useEffect(() => {
+    setSubmittedRequestIds({});
+  }, [currentSessionId]);
 
-    // 1. 无会话时自动创建
+  // 发送消息处理
+  const handleSend = useCallback(async (text: string) => {
+    if (!token || !text.trim() || isLoading) return;
+
+    // 若无当前会话，先自动创建会话 Thread
     let sessionId = currentSessionId;
     if (!sessionId) {
       const autoTitle = text.length > 24 ? `${text.slice(0, 24)}...` : text;
@@ -125,57 +64,38 @@ export const ChatWindow: React.FC = () => {
       sessionId = created.id;
     }
 
-    // 2. 乐观追加用户消息
-    appendMessage({
-      id: tempId(),
-      role: "USER",
-      content_type: "text",
-      content: { text },
-      task_id: null,
-      status: "done",
-      seq: Date.now(),
-      created_at: new Date().toISOString(),
-    });
-
-    // 3. 追加 Agent 流式占位
-    const agentMsgId = tempId();
-    streamingMsgIdRef.current = agentMsgId;
-    appendMessage({
-      id: agentMsgId,
-      role: "AGENT",
-      content_type: "text",
-      content: { text: "" },
-      task_id: null,
-      status: "streaming",
-      seq: Date.now() + 1,
-      created_at: new Date().toISOString(),
-    });
-
-    // 4. 触发 LangGraph 官方 useStream 推理
+    // 由 LangGraph SDK 官方 submit() 驱动整个单向数据流与乐观更新
     submit(text);
-  };
+  }, [token, isLoading, currentSessionId, createSession, submit]);
+
+  // 监听并处理 HITL 快捷提交事件
+  useEffect(() => {
+    const onHitlSubmit = (e: any) => {
+      const text = e.detail;
+      if (text) {
+        handleSend(text);
+      }
+    };
+    window.addEventListener("submit_hitl_response", onHitlSubmit);
+    return () => window.removeEventListener("submit_hitl_response", onHitlSubmit);
+  }, [handleSend]);
 
   const handleCancel = useCallback(async () => {
     await cancel();
-    const msgId = streamingMsgIdRef.current;
-    if (msgId) {
-      updateMessage(msgId, { status: "failed" });
-      streamingMsgIdRef.current = null;
-    }
     setCurrentRunId(null);
-  }, [cancel, updateMessage, setCurrentRunId]);
+  }, [cancel, setCurrentRunId]);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden">
       <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 space-y-2 scrollbar-thin scrollbar-thumb-slate-800">
-        {!currentSessionId || storeMessages.length === 0 ? (
+        {!currentSessionId || renderedTurns.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-8 max-w-lg mx-auto">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white mb-4 shadow-xl shadow-indigo-950/50">
               <Bot className="w-7 h-7" />
             </div>
             <h2 className="text-lg font-bold text-slate-100 mb-1.5">欢迎使用 Antigravity Agent</h2>
             <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-              全链路企业级 Agent 交互平台，P0 阶段支持基础 LLM 对话与流式实时回复。
+              全链路企业级 Agent 交互平台，完全由 LangGraph 官方流式架构驱动。
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full text-left">
               <button
@@ -194,13 +114,36 @@ export const ChatWindow: React.FC = () => {
               </button>
             </div>
           </div>
-        ) : isLoadingMessages ? (
-          <div className="flex items-center justify-center h-full text-xs text-slate-500 animate-pulse">
-            正在加载会话历史...
-          </div>
         ) : (
-          storeMessages.map((msg) => <MessageItem key={msg.id} message={msg} />)
+          /* 遍历渲染聚合后的任务轮次卡片：工具消息与 AI 消息融为一体，彻底消灭空白与脱节 */
+          renderedTurns.map((turn: any, idx: number) => (
+            <MessageItem key={turn.id || `turn-${idx}`} message={turn} />
+          ))
         )}
+
+        {/* 官方 LangGraph HITL interrupt 待审批交互卡片 */}
+        {actionRequests && actionRequests.length > 0 && actionRequests
+          .filter((req: any, idx: number) => !submittedRequestIds[req.id || String(idx)])
+          .map((req: any, idx: number) => {
+            const reqKey = req.id || String(idx);
+            return (
+              <div key={reqKey} className="flex justify-start my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <HitlFormCard
+                  title={req.title || "人机协同操作审批"}
+                  description={req.description || ""}
+                  riskLevel={req.risk_level || "high"}
+                  formFields={req.form_fields || []}
+                  onSubmit={(formData) => {
+                    // 1. 标记当前请求已提交，立即从待审批列表中移除
+                    setSubmittedRequestIds((prev: Record<string, boolean>) => ({ ...prev, [reqKey]: true }));
+                    // 2. 调用 resume 恢复中断（将人类决策送回 tools_node 中的 interrupt() 调用点）
+                    resume(formData);
+                  }}
+                />
+              </div>
+            );
+          })}
+
         <div ref={messagesEndRef} />
       </div>
 

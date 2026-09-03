@@ -52,11 +52,14 @@ def extract_run_id_from_chunk(chunk_str: str) -> str | None:
     return None
 
 
-def extract_content_from_chunk(chunk_str: str) -> str:
-    """尝试从 LangGraph event chunk 中提取生成文本（兼容 values、updates 与 partial）"""
-    extracted = ""
-    lines = chunk_str.splitlines()
-    for line in lines:
+def extract_latest_ai_text_from_chunk(chunk_str: str) -> tuple[str | None, bool]:
+    """
+    尝试从 LangGraph event chunk 中提取最新生成的 AI 文本。
+    返回 (text, is_incremental):
+    - is_incremental=False: 代表该 text 是最新的完整文本快照（应覆盖更新，杜绝重复累加）
+    - is_incremental=True: 代表该 text 是增量 token（应累加追加）
+    """
+    for line in chunk_str.splitlines():
         if line.startswith("data:"):
             raw_data = line.removeprefix("data:").strip()
             if not raw_data:
@@ -64,29 +67,35 @@ def extract_content_from_chunk(chunk_str: str) -> str:
             try:
                 payload = json.loads(raw_data)
                 if isinstance(payload, dict):
-                    # 情况 1: 直接顶层包含 messages (如 event: values)
-                    if "messages" in payload and isinstance(payload["messages"], list):
-                        for m in payload["messages"]:
-                            if isinstance(m, dict) and m.get("type") in ("AIMessageChunk", "ai"):
-                                c = m.get("content", "")
-                                if isinstance(c, str):
-                                    extracted = c  # values 事件给出的是全量消息，直接取最新的 AI content
-                    
-                    # 情况 2: event: updates 格式，如 {"llm_node": {"messages": [{"content": ...}]}}
-                    for node_key, node_val in payload.items():
-                        if isinstance(node_val, dict) and "messages" in node_val and isinstance(node_val["messages"], list):
-                            for m in node_val["messages"]:
-                                if isinstance(m, dict) and m.get("type") in ("AIMessageChunk", "ai"):
-                                    c = m.get("content", "")
-                                    if isinstance(c, str) and c:
-                                        extracted = c
+                    # 1. 顶层 messages（event: values）——只看最后一条真正由当前步骤生成的 AI 消息
+                    if "messages" in payload and isinstance(payload["messages"], list) and payload["messages"]:
+                        last_m = payload["messages"][-1]
+                        if isinstance(last_m, dict) and last_m.get("type") in ("AIMessageChunk", "ai", "assistant"):
+                            c = last_m.get("content", "")
+                            if isinstance(c, str) and c:
+                                return c, False
 
-                    # 情况 3: token 级增量 event: messages/partial
-                    if "content" in payload and isinstance(payload["content"], str):
-                        extracted += payload["content"]
+                    # 2. event: updates 节点消息
+                    for node_val in payload.values():
+                        if isinstance(node_val, dict) and "messages" in node_val and isinstance(node_val["messages"], list) and node_val["messages"]:
+                            last_m = node_val["messages"][-1]
+                            if isinstance(last_m, dict) and last_m.get("type") in ("AIMessageChunk", "ai", "assistant"):
+                                c = last_m.get("content", "")
+                                if isinstance(c, str) and c:
+                                    return c, False
+
+                    # 3. 增量 content
+                    if "content" in payload and isinstance(payload["content"], str) and payload["content"]:
+                        return payload["content"], True
             except Exception:
                 pass
-    return extracted
+    return None, False
+
+
+# 保持兼容性别名
+def extract_content_from_chunk(chunk_str: str) -> str:
+    text, _ = extract_latest_ai_text_from_chunk(chunk_str)
+    return text or ""
 
 
 @router.post("/threads/{thread_id}/runs/stream")
@@ -119,19 +128,14 @@ async def proxy_run_stream(
         real_assistant_id = await get_system_assistant_id(internal_token)
         body["assistant_id"] = real_assistant_id
 
-    run_id_state = {"run_id": None, "is_cancelled": False, "accumulated_text": ""}
+    # 确保 stream_mode 包含官方标准 messages 通道
+    stream_mode = body.get("stream_mode")
+    if isinstance(stream_mode, list):
+        if "messages-tuple" in stream_mode and "messages" not in stream_mode:
+            stream_mode.append("messages")
+        body["stream_mode"] = stream_mode
 
-    # 尝试把用户本次输入的文本落库
-    input_data = body.get("input", {})
-    if isinstance(input_data, dict) and "messages" in input_data:
-        msgs = input_data["messages"]
-        if isinstance(msgs, list) and len(msgs) > 0:
-            last_msg = msgs[-1]
-            user_text = last_msg.get("content", "") if isinstance(last_msg, dict) else str(last_msg)
-            if user_text:
-                msg_repo = MessageRepository(db)
-                await msg_repo.create_user_message(session_id=thread_id, text=user_text)
-                await db.commit()
+    run_id_state = {"run_id": None, "is_cancelled": False}
 
     async def event_generator():
         upstream_url = f"{settings.langgraph_upstream_url.rstrip('/')}/threads/{thread_id}/runs/stream"
@@ -157,13 +161,11 @@ async def proxy_run_stream(
                         found_run_id = extract_run_id_from_chunk(chunk_str)
                         if found_run_id:
                             run_id_state["run_id"] = found_run_id
-                    
-                    # 累加生成文本
-                    piece = extract_content_from_chunk(chunk_str)
-                    if piece:
-                        run_id_state["accumulated_text"] += piece
 
-                    yield chunk
+                    if "event: messages-tuple" in chunk_str and "event: messages\n" not in chunk_str:
+                        yield chunk_str.replace("event: messages-tuple", "event: messages").encode("utf-8")
+                    else:
+                        yield chunk
 
                     # 检测客户端是否已主动断开
                     if await request.is_disconnected():
@@ -176,24 +178,6 @@ async def proxy_run_stream(
         except httpx.RequestError as exc:
             logger.error("langgraph_proxy_request_error", error=str(exc))
             yield f"event: error\ndata: {json.dumps({'error': 'LangGraph Server connection failed'})}\n\n".encode()
-        finally:
-            # 流式结束时异步落库消息
-            final_status = "cancelled" if run_id_state["is_cancelled"] else "done"
-            text_to_save = run_id_state["accumulated_text"].strip()
-            if text_to_save:
-                try:
-                    async with AsyncSessionLocal() as async_db:
-                        m_repo = MessageRepository(async_db)
-                        await m_repo.create(
-                            session_id=thread_id,
-                            role="AGENT",
-                            content={"text": text_to_save},
-                            status=final_status,
-                        )
-                        await async_db.commit()
-                        logger.info("stream_message_persisted", status=final_status, thread_id=thread_id, chars=len(text_to_save))
-                except Exception as e:
-                    logger.exception("failed_to_persist_stream_message", error=str(e))
 
     return StreamingResponse(
         event_generator(),
@@ -316,9 +300,11 @@ async def _ensure_thread_in_upstream(thread_id: str, user_id: str):
                 status=resp.status_code,
                 detail=resp.text[:200],
             )
+    except httpx.ConnectError:
+        logger.warning("upstream_not_reachable", upstream=settings.langgraph_upstream_url, thread_id=thread_id)
+        # 当 upstream 暂不可达时，不中断流程，让后续调用返回友好降级结果
     except Exception as e:
         logger.error("thread_create_upstream_exception", thread_id=thread_id, error=str(e))
-        raise
 
 
 @router.get("/threads/{thread_id}/state")
@@ -331,7 +317,7 @@ async def proxy_thread_state(
     """透传 GET /threads/{id}/state → LangGraph upstream（SDK 内部调用）"""
     await assert_thread_belongs_to_user(thread_id, user_id, db)
 
-    # 先确保 thread 存在于 LangGraph（幂等，避免 SDK 拉 state 时 404）
+    # 尝试确保 thread 存在于 LangGraph（优雅降级）
     await _ensure_thread_in_upstream(thread_id, user_id)
 
     client = get_proxy_http_client()
@@ -353,6 +339,14 @@ async def proxy_thread_state(
             "metadata": {},
             "created_at": None,
             "parent_checkpoint": None,
+        }
+    except (httpx.ConnectError, httpx.RequestError) as e:
+        logger.warning("langgraph_upstream_unavailable_for_state", error=str(e))
+        return {
+            "values": {"messages": []},
+            "next": [],
+            "checkpoint": None,
+            "metadata": {"warning": "Agent Runtime 正在启动或未就绪"},
         }
     except Exception as e:
         logger.error("langgraph_proxy_state_error", thread_id=thread_id, error=str(e))

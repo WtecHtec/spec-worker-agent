@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuthStore } from "@/store/useAuthStore";
+import { API_BASE } from "@/lib/api";
 
 interface McpServer {
   id: string;
@@ -64,7 +65,7 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
   const [mcpTransport, setMcpTransport] = useState<"stdio" | "sse" | "streamable_http">("stdio");
   const [mcpCommand, setMcpCommand] = useState("python");
   const [mcpArgs, setMcpArgs] = useState("mcp-servers/sqlite_server/server.py");
-  const [mcpUrl, setMcpUrl] = useState("http://localhost:8000/sse");
+  const [mcpUrl, setMcpUrl] = useState(`${API_BASE}/sse`);
   const [mcpNamespace, setMcpNamespace] = useState("custom");
   const [mcpDesc, setMcpDesc] = useState("");
   const [testResult, setTestResult] = useState<{
@@ -99,7 +100,7 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
   const fetchMcpServers = async () => {
     setIsLoadingMcp(true);
     try {
-      const res = await fetch("http://localhost:8000/api/ecosystem/mcp", {
+      const res = await fetch(`${API_BASE}/api/ecosystem/mcp`, {
         headers: getHeaders(),
       });
       const data = await res.json();
@@ -116,7 +117,7 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
   const fetchA2aAgents = async () => {
     setIsLoadingA2a(true);
     try {
-      const res = await fetch("http://localhost:8000/api/ecosystem/a2a", {
+      const res = await fetch(`${API_BASE}/api/ecosystem/a2a`, {
         headers: getHeaders(),
       });
       const data = await res.json();
@@ -149,7 +150,7 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
         payload.server_url = mcpUrl;
       }
 
-      const res = await fetch("http://localhost:8000/api/ecosystem/mcp/test", {
+      const res = await fetch(`${API_BASE}/api/ecosystem/mcp/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -183,7 +184,7 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
         payload.server_url = mcpUrl;
       }
 
-      const res = await fetch("http://localhost:8000/api/ecosystem/mcp", {
+      const res = await fetch(`${API_BASE}/api/ecosystem/mcp`, {
         method: "POST",
         headers: getHeaders(),
         body: JSON.stringify(payload),
@@ -193,6 +194,9 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
         setIsAddingMcp(false);
         setTestResult(null);
         fetchMcpServers();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("ecosystem_updated"));
+        }
       }
     } catch (e: any) {
       alert(`保存失败: ${e.message}`);
@@ -202,11 +206,14 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
   const handleDeleteMcp = async (id: string) => {
     if (!confirm("确定要卸载该 MCP 服务吗？")) return;
     try {
-      await fetch(`http://localhost:8000/api/ecosystem/mcp/${id}`, {
+      await fetch(`${API_BASE}/api/ecosystem/mcp/${id}`, {
         method: "DELETE",
         headers: getHeaders(),
       });
       fetchMcpServers();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("ecosystem_updated"));
+      }
     } catch (e: any) {
       alert(`删除失败: ${e.message}`);
     }
@@ -216,7 +223,7 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
     setIsTestingA2a(true);
     setA2aTestResult(null);
     try {
-      const res = await fetch("http://localhost:8000/api/ecosystem/a2a/test", {
+      const res = await fetch(`${API_BASE}/api/ecosystem/a2a/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ endpoint_url: a2aUrl }),
@@ -236,7 +243,7 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
       return;
     }
     try {
-      const res = await fetch("http://localhost:8000/api/ecosystem/a2a", {
+      const res = await fetch(`${API_BASE}/api/ecosystem/a2a`, {
         method: "POST",
         headers: getHeaders(),
         body: JSON.stringify({
@@ -252,6 +259,9 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
         setA2aTestResult(null);
         setA2aUrl("http://localhost:8090");
         fetchA2aAgents();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("ecosystem_updated"));
+        }
       } else {
         alert(`添加失败: ${JSON.stringify(data)}`);
       }
@@ -263,11 +273,14 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
   const handleDeleteA2a = async (id: string) => {
     if (!confirm("确定要移除该 A2A 智能体服务吗？")) return;
     try {
-      await fetch(`http://localhost:8000/api/ecosystem/a2a/${id}`, {
+      await fetch(`${API_BASE}/api/ecosystem/a2a/${id}`, {
         method: "DELETE",
         headers: getHeaders(),
       });
       fetchA2aAgents();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("ecosystem_updated"));
+      }
     } catch (e: any) {
       alert(`删除失败: ${e.message}`);
     }
@@ -469,7 +482,7 @@ export const EcosystemModal: React.FC<EcosystemModalProps> = ({ isOpen, onClose 
                         placeholder={
                           mcpTransport === "streamable_http"
                             ? "https://mcp.api-inference.modelscope.net/mcp"
-                            : "http://localhost:8000/sse"
+                            : `${API_BASE}/sse`
                         }
                         className="w-full mt-1 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
                       />

@@ -335,3 +335,40 @@ async def delete_a2a_agent(
         "success": success,
         "message": "A2A 服务已成功移除。" if success else "未找到对应服务或无权限。",
     }
+
+
+@router.get("/active-tools")
+async def get_active_tools(
+    user_id: str = Depends(get_current_user_id_flexible),
+):
+    """
+    多租户工具查询：获取当前登录用户当前生效的所有工具列表
+    （包含系统内置、Docker沙箱、CDP浏览器，以及该用户专属启用的 MCP 和 A2A 工具）
+    """
+    registry = await user_tool_registry_manager.get_registry_for_user(user_id)
+    tool_items = []
+    for t in registry.list_tools():
+        name = t.name
+        if name.startswith("mcp_"):
+            category = "mcp"
+        elif name.startswith("a2a_"):
+            category = "a2a"
+        elif name.startswith("sandbox_"):
+            category = "sandbox"
+        elif name.startswith("browser_"):
+            category = "browser"
+        else:
+            category = "builtin"
+
+        tool_items.append({
+            "name": name,
+            "description": t.description,
+            "parameters": t.parameters,
+            "category": category,
+        })
+
+    return {
+        "user_id": user_id,
+        "total_count": len(tool_items),
+        "tools": tool_items,
+    }

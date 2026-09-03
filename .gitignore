@@ -36,3 +36,4 @@ sandbox/bin/
 *.swp
 *.swo
 .langgraph_api
+.pytest_cache
