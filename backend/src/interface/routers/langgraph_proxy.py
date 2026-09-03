@@ -353,18 +353,43 @@ async def proxy_thread_state(
         return {"values": {"messages": []}, "next": [], "checkpoint": None, "metadata": {}}
 
 
-@router.get("/threads/{thread_id}/history")
+@router.api_route("/threads/{thread_id}/history", methods=["GET", "POST"])
 async def proxy_thread_history(
     thread_id: str,
     request: Request,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """透传 GET /threads/{id}/history → LangGraph upstream（SDK 内部调用）"""
+    """透传 GET/POST /threads/{id}/history → LangGraph upstream（官方 SDK getHistory 内部调用）"""
     await assert_thread_belongs_to_user(thread_id, user_id, db)
+    await _ensure_thread_in_upstream(thread_id, user_id)
+
+    client = get_proxy_http_client()
+    token = mint_internal_jwt(user_id=user_id, ttl_seconds=60)
+    url = f"{settings.langgraph_upstream_url.rstrip('/')}/threads/{thread_id}/history"
     query = str(request.query_params)
-    data = await _proxy_get(f"/threads/{thread_id}/history", user_id, query)
-    return data
+    if query:
+        url += f"?{query}"
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+    try:
+        if request.method == "POST":
+            headers["Content-Type"] = "application/json"
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            resp = await client.post(url, json=body, headers=headers)
+        else:
+            resp = await client.get(url, headers=headers)
+
+        if resp.status_code == 200:
+            return resp.json()
+        return []
+    except Exception as e:
+        logger.error("langgraph_proxy_history_error", thread_id=thread_id, error=str(e))
+        return []
 
 
 @router.get("/assistants/{assistant_id}")

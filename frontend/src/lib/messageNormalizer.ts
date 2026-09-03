@@ -169,3 +169,31 @@ export function groupMessagesIntoTurns(rawMessages: any[]): NormalizedTurn[] {
 
   return turns;
 }
+
+/**
+ * 动静分离拆解器：将消息流拆分为“已完成静态历史”与“当前活跃流式轮次”
+ * 确保推流期间历史列表引用绝对稳定（0 重绘），高频更新仅集中在 activeTurn
+ */
+export function splitCompletedAndActive(
+  rawMessages: any[],
+  isStreaming: boolean
+): { completedTurns: NormalizedTurn[]; activeTurn: NormalizedTurn | null } {
+  const allTurns = groupMessagesIntoTurns(rawMessages);
+  if (allTurns.length === 0) {
+    return { completedTurns: [], activeTurn: null };
+  }
+
+  // 仅在正在处于流式态且末尾为 Agent 回答时，将其隔离为 activeTurn
+  const lastTurn = allTurns[allTurns.length - 1];
+  if (isStreaming && lastTurn.role === "agent") {
+    return {
+      completedTurns: allTurns.slice(0, -1),
+      activeTurn: lastTurn,
+    };
+  }
+
+  return {
+    completedTurns: allTurns,
+    activeTurn: null,
+  };
+}

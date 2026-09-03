@@ -9,9 +9,9 @@
  * - cancel() 同时调用 stream.stop()（停止前端渲染）+ 网关真实 Cancel 接口
  */
 
-import { useRef, useCallback } from "react";
+import { useMemo, useRef, useCallback } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import type { ThreadState } from "@langchain/langgraph-sdk";
+import { Client, type ThreadState } from "@langchain/langgraph-sdk";
 import { API_BASE } from "@/lib/api";
 
 // LangGraph 消息格式（SDK 内部格式）
@@ -49,10 +49,46 @@ export function useLangGraphStream({
 }: UseLangGraphStreamOptions) {
   const activeRunIdRef = useRef<string | null>(null);
 
-  const authHeaders: Record<string, string> = {};
-  if (token) {
-    authHeaders["Authorization"] = `Bearer ${token}`;
-  }
+  const authHeaders: Record<string, string> = useMemo(() => {
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    return headers;
+  }, [token]);
+
+  // 官方 LangGraph SDK 客户端实例：直连后端网关代理与底层 Checkpointer 数据库
+  const client = useMemo(() => {
+    return new Client({
+      apiUrl: API_BASE,
+      defaultHeaders: authHeaders,
+    });
+  }, [authHeaders]);
+
+  // 获取数据库真实持久化的 Thread Checkpoint 历史快照
+  const getHistory = useCallback(
+    async (options?: Parameters<Client["threads"]["getHistory"]>[1]) => {
+      if (!threadId) return [];
+      try {
+        return await client.threads.getHistory(threadId, options);
+      } catch (err) {
+        console.error("[useLangGraphStream] client.threads.getHistory failed:", err);
+        return [];
+      }
+    },
+    [client, threadId]
+  );
+
+  // 获取数据库当前 Thread 的最新完整状态快照
+  const getState = useCallback(async () => {
+    if (!threadId) return null;
+    try {
+      return await client.threads.getState(threadId);
+    } catch (err) {
+      console.error("[useLangGraphStream] client.threads.getState failed:", err);
+      return null;
+    }
+  }, [client, threadId]);
 
   const stream = useStream<AgentState>({
     apiUrl: API_BASE,
@@ -181,6 +217,12 @@ export function useLangGraphStream({
     actionRequests,
     /** 停止生成（前端 + 服务端双重终止） */
     cancel,
+    /** 官方 Client 实例 */
+    client,
+    /** 从数据库拉取历史 Checkpoint 状态列表 */
+    getHistory,
+    /** 获取当前 Thread 最新状态快照 */
+    getState,
     /** 当前 run_id */
     currentRunId: activeRunIdRef.current,
     /** 原始 stream 对象（供高级用途） */
