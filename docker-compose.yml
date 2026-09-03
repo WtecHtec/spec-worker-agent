@@ -35,7 +35,31 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # ─── 3. Backend API Server (FastAPI) ───
+  # ─── 3. LangGraph Runtime (Agent 运行时) ───
+  agent-runtime:
+    build:
+      context: ./agent-runtime
+      dockerfile: Dockerfile
+    container_name: agent_runtime
+    ports:
+      - "8123:8123"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app
+      REDIS_URL: redis://redis:6379/0
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET:-internal-service-secret-key-32-chars}
+      PORT: 8123
+      HOST: "0.0.0.0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── 4. Backend API Server (FastAPI) ───
   backend-api:
     build:
       context: ./backend
@@ -47,6 +71,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/app
       REDIS_URL: redis://redis:6379/0
+      LANGGRAPH_UPSTREAM_URL: http://agent-runtime:8123
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET:-internal-service-secret-key-32-chars}
       APP_ENV: production
       RATE_LIMIT_ENABLED: "true"
       MAX_CONCURRENT_TASKS_PER_USER: 3
@@ -57,6 +83,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      agent-runtime:
+        condition: service_started
     restart: unless-stopped
 
   # ─── 4. Backend Worker (任务执行与调度引擎) ───

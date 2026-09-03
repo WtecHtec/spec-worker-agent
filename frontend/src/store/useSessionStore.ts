@@ -6,11 +6,13 @@ interface SessionState {
   sessions: Session[];
   currentSessionId: string | null;
   messages: Message[];
+  currentRunId: string | null;
   isLoadingSessions: boolean;
   isLoadingMessages: boolean;
   isSending: boolean;
   error: string | null;
 
+  setCurrentRunId: (runId: string | null) => void;
   fetchSessions: (token: string) => Promise<void>;
   createSession: (token: string, title?: string) => Promise<Session>;
   deleteSession: (sessionId: string, token: string) => Promise<void>;
@@ -26,11 +28,14 @@ interface SessionState {
 export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
   currentSessionId: null,
+  currentRunId: null,
   messages: [],
   isLoadingSessions: false,
   isLoadingMessages: false,
   isSending: false,
   error: null,
+
+  setCurrentRunId: (runId: string | null) => set({ currentRunId: runId }),
 
   fetchSessions: async (token: string) => {
     set({ isLoadingSessions: true, error: null });

@@ -10,13 +10,18 @@ import { api } from "@/lib/api";
 
 interface ChatInputProps {
   onSendMessage: (text: string) => Promise<void>;
+  onCancel?: () => Promise<void>;
   isSending?: boolean;
+  isStreaming?: boolean;
+  /** @deprecated 保留旧字段兼容，P0 阶段 LangGraph 模式无需 activeTaskId */
   activeTaskId?: string | null;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSendMessage,
+  onCancel,
   isSending = false,
+  isStreaming = false,
   activeTaskId = null,
 }) => {
   const [content, setContent] = useState("");
@@ -36,7 +41,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   }, [content]);
 
   const handleSend = async () => {
-    if (!content.trim() || isSending || activeTaskId) return;
+    const busy = isSending || isStreaming || !!activeTaskId;
+    if (!content.trim() || busy) return;
     const text = content.trim();
     setContent("");
     if (textareaRef.current) {
@@ -52,25 +58,31 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
 
+  // 优先使用新的 onCancel 回调（LangGraph 模式），降级到旧 Task 取消逻辑
   const handleCancelTask = async () => {
-    if (!activeTaskId || !token || isCancelling) return;
+    if (isCancelling) return;
     setIsCancelling(true);
     try {
-      await api.cancelTask(activeTaskId, token);
-      // 立即在前端更新会话与任务状态，无需完全依赖 SSE 事件到达
-      updateMessageByTaskId(activeTaskId, {
-        status: "failed",
-        content: { text: "任务已被取消。", task_status: "CANCELLED" },
-      });
-      setTaskStatus(activeTaskId, "CANCELLED");
-      toast.info("任务已成功终止", "任务已取消");
+      if (onCancel) {
+        await onCancel();
+      } else if (activeTaskId && token) {
+        // 旧版 Task Worker 兼容路径
+        await api.cancelTask(activeTaskId, token);
+        updateMessageByTaskId(activeTaskId, {
+          status: "failed",
+          content: { text: "任务已被取消。", task_status: "CANCELLED" },
+        });
+        setTaskStatus(activeTaskId, "CANCELLED");
+      }
+      toast.info("已停止生成", "已取消");
     } catch (err: any) {
-      console.error("Failed to cancel task:", err);
-      toast.error(err.message || "终止任务失败，请重试", "取消失败");
+      toast.error(err.message || "终止失败，请重试", "取消失败");
     } finally {
       setIsCancelling(false);
     }
   };
+
+  const isActive = isStreaming || !!activeTaskId;
 
   const QUICK_PROMPTS = [
     { title: "📄 创建文件", text: "请在沙箱中帮我创建一个 utils.py 文件，编写常用日期格式化与字符串处理函数并打印输出。" },
@@ -89,7 +101,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           <button
             key={idx}
             onClick={() => setContent(p.text)}
-            disabled={isSending || !!activeTaskId}
+            disabled={isActive}
             className="text-xs px-2.5 py-1 rounded-full border border-slate-800 bg-slate-900/60 text-slate-300 hover:border-indigo-500/50 hover:bg-indigo-500/10 hover:text-indigo-200 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {p.title}
@@ -104,18 +116,18 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={isSending || !!activeTaskId}
+          disabled={isActive}
           placeholder={
-            activeTaskId
-              ? "Agent 正在执行任务中，点击右下角按钮可终止..."
-              : "输入您想让 Agent 执行的任务... (Enter 发送，Shift+Enter 换行)"
+            isActive
+              ? "正在生成中，点击右侧按钮可停止..."
+              : "输入您想问的问题... (Enter 发送，Shift+Enter 换行)"
           }
           rows={1}
           className="w-full resize-none bg-transparent px-4 py-3.5 pr-24 text-sm text-slate-100 placeholder-slate-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
         />
 
         <div className="absolute right-2.5 bottom-2.5 flex items-center gap-1.5">
-          {activeTaskId ? (
+          {isActive ? (
             <button
               onClick={handleCancelTask}
               disabled={isCancelling}
@@ -132,7 +144,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           ) : (
             <button
               onClick={handleSend}
-              disabled={!content.trim() || isSending}
+              disabled={!content.trim() || isActive}
               className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shadow-md shadow-indigo-900/40 active:scale-95"
             >
               {isSending ? (

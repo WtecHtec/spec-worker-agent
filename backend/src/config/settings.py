@@ -98,6 +98,10 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_requests_per_minute: int = 120
 
+    # ── LangGraph Runtime ───────────────────────
+    langgraph_upstream_url: str = "http://localhost:8123"
+    internal_jwt_secret: str = "internal-service-secret-key-32-chars"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",")]

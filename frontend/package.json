@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@langchain/langgraph-sdk": "^1.10.0",
     "@webcontainer/api": "^1.6.4",
     "clsx": "^2.1.1",
     "framer-motion": "^13.1.1",

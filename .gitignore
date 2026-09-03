@@ -35,3 +35,4 @@ sandbox/bin/
 .idea/
 *.swp
 *.swo
+.langgraph_api
