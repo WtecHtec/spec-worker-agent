@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # ─── 1. PostgreSQL 关系型数据库 ───
+  postgres:
+    image: postgres:17-alpine
+    container_name: agent_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d app"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── 2. Redis 内存缓存与消息队列 ───
+  redis:
+    image: redis:7-alpine
+    container_name: agent_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── 3. Backend API Gateway (FastAPI) ───
+  backend-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent_api
+    command: >
+      sh -c "uv run alembic upgrade head &&
+             uv run uvicorn api_main:app --host 0.0.0.0 --port 8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/app
+      REDIS_URL: redis://redis:6379/0
+      LANGGRAPH_UPSTREAM_URL: ${LANGGRAPH_UPSTREAM_URL:-http://host.docker.internal:8123}
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET:-internal-service-secret-key-32-chars}
+      APP_ENV: production
+      RATE_LIMIT_ENABLED: "true"
+      MAX_CONCURRENT_TASKS_PER_USER: 3
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

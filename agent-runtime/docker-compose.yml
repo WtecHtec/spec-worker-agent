@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  # ─── LangGraph API Server (在线交互 / REST / SSE) ───
+  agent-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent_runtime
+    ports:
+      - "8123:8123"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:5432/app}
+      POSTGRES_URI: ${POSTGRES_URI:-postgresql://postgres:postgres@host.docker.internal:5432/app}
+      REDIS_URL: ${REDIS_URL:-redis://host.docker.internal:6379/0}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET:-internal-service-secret-key-32-chars}
+      SANDBOX_DAEMON_URL: ${SANDBOX_DAEMON_URL:-http://host.docker.internal:5050}
+      PORT: 8123
+      HOST: "0.0.0.0"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

@@ -106,36 +106,36 @@ uv sync
 
 ---
 
-## Docker 单独启动
+---
+
+## Docker 容器化运行
+
+### 1. 使用模块内 docker-compose 启动（推荐）
+
+在 `agent-runtime/` 目录下直接使用模块独立的 `docker-compose.yml`：
 
 ```bash
-# 构建镜像（使用 uv，依赖层缓存友好）
+cd agent-runtime
+
+# 构建并后台启动 agent-runtime 容器（端口 8123）
+docker compose up -d --build
+```
+
+### 2. 使用 Docker 单独构建与运行
+
+```bash
+cd agent-runtime
+
+# 构建镜像
 docker build -t agent-runtime:latest .
 
-# 运行（挂载本地 .env）
-docker run -p 8123:8123 \
+# 启动容器（映射 8123 端口，挂载 .env）
+docker run -d \
+  -p 8123:8123 \
   --env-file .env \
   --name agent-runtime \
   agent-runtime:latest
 ```
-
----
-
-## Docker Compose 启动（推荐）
-
-项目根目录的 `docker-compose.yml` 已集成 agent-runtime 服务，配合 backend、frontend、postgres、redis 一起启动：
-
-```bash
-# 在项目根目录
-cp .env.example .env   # 配置根级 .env（含 LLM_API_KEY 等）
-
-docker compose up --build
-
-# 或后台启动
-docker compose up -d --build
-```
-
-服务启动顺序：`postgres` → `redis` → `agent-runtime(:8123)` → `backend-api(:8000)` → `frontend(:3000)`
 
 ---
 

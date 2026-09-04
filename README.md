@@ -124,59 +124,57 @@
 
 ---
 
-## 🚀 Docker Compose 容器编排
+## 🚀 模块化 Docker Compose 容器编排
 
-项目提供一键容器化编排文件 `docker-compose.yml`，开箱即用集成全套核心基础设施与应用服务。
+系统遵循**各子模块自内聚、独立维护自身容器定义**的架构原则，根目录不存放单体编排文件，各模块在各自目录下独立管理 `docker-compose.yml`：
 
-### 容器服务清单
+### 模块编排分布与职责
 
-| 服务名称 | 镜像 / 构建上下文 | 宿主机端口 | 说明 |
-|---|---|---|---|
-| `postgres` | `postgres:17-alpine` | `5432` | 关系型数据库，带健康就绪检查探针 |
-| `redis` | `redis:7-alpine` | `6379` | 任务 Stream 队列、Pub/Sub 广播、分布式锁与失效通道 |
-| `backend-api` | `./backend/Dockerfile` | `8000` | FastAPI 接口网关 (自动执行 Alembic 数据库迁移) |
-| `backend-worker` | `./backend/Dockerfile` | - | 后台智能体分布式调度与执行引擎 |
-| `frontend` | `./frontend/Dockerfile` | `3000` | Next.js 14 生产环境客户端 |
+| 模块目录 | 编排文件 | 容器服务 | 默认端口 | 职责定位 |
+|---|---|---|---|---|
+| **`sandbox/`** | `sandbox/docker-compose.yml` | `agent-sandbox` | `5050` | 物理隔离沙箱容器（含 Chromium 浏览器与 Go Daemon） |
+| **`backend/`** | `backend/docker-compose.yml` | `postgres`<br/>`redis`<br/>`backend-api` | `5432`<br/>`6379`<br/>`8000` | 基础设施中间件与 FastAPI 统一业务接口网关 |
+| **`agent-runtime/`** | `agent-runtime/docker-compose.yml` | `agent-runtime` | `8123` | LangGraph 核心智能体运行时（负责 REST/SSE、租户鉴权与 StateGraph 执行） |
+| **`frontend/`** | `frontend/docker-compose.yml` | `agent_frontend` | `3000` | Next.js 14 Web 客户端界面 |
 
-### 快速启动命令
+### 各模块启动指引
 
 ```bash
-# 1. 启动全套服务（后台运行）
-docker compose up -d
+# 1. 启动沙箱守护服务 (Docker + Chromium)
+cd sandbox && docker compose up -d
 
-# 2. 查看各容器健康与运行状态
-docker compose ps
+# 2. 启动基础存储与后端网关 (Postgres, Redis & FastAPI)
+cd backend && docker compose up -d
 
-# 3. 跟踪查看实时日志流
-docker compose logs -f
+# 3. 启动 LangGraph 运行时
+cd agent-runtime && docker compose up -d
 
-# 4. 停止所有服务
-docker compose down
+# 4. 启动前端客户端
+cd frontend && docker compose up -d
 ```
 
 ---
 
 ## 🛠️ 本地敏捷开发指南
 
-### 1. 启动后端与依赖
+### 1. 启动后端与依赖中间件
 
 ```bash
 # 步骤 1: 启动依赖中间件 (PostgreSQL & Redis)
 docker compose up -d postgres redis
 
-# 步骤 2: 配置环境变量
-cd backend
-cp .env.example .env  # 配置 OPENAI_API_KEY / 数据库连接等
+# 步骤 2: 启动 LangGraph 运行时（端口 8123）
+cd agent-runtime
+cp .env.example .env
+uv sync
+uv run langgraph dev --host 0.0.0.0 --port 8123 --no-browser
 
-# 步骤 3: 初始化依赖与数据库迁移
+# 步骤 3: 启动后端 FastAPI 网关（端口 8000）
+cd ../backend
+cp .env.example .env  # 配置 OPENAI_API_KEY / 数据库连接等
 uv sync
 uv run alembic upgrade head
-
-# 步骤 4: 启动后端 API 网关
 uv run uvicorn api_main:app --host 0.0.0.0 --port 8000 --reload
-
-# 步骤 5: 启动独立 Worker 执行引擎
-uv run python3 worker_main.py
 ```
 
 ### 2. 启动前端应用
