@@ -65,7 +65,7 @@ export const Sidebar: React.FC = () => {
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <h1 className="font-bold text-sm text-slate-100 tracking-tight">Antigravity Agent</h1>
+            <h1 className="font-bold text-sm text-slate-100 tracking-tight">X Agent</h1>
             <span className="text-[10px] text-slate-500 font-mono">v1.0 (Full P0-P3)</span>
           </div>
         </div>
@@ -126,11 +126,10 @@ export const Sidebar: React.FC = () => {
                       token && selectSession(session.id, token);
                     }
                   }}
-                  className={`w-full flex items-start gap-3 p-3 rounded-xl text-left transition-all duration-200 group cursor-pointer ${
-                    isSelected
+                  className={`w-full flex items-start gap-3 p-3 rounded-xl text-left transition-all duration-200 group cursor-pointer ${isSelected
                       ? "bg-indigo-600/15 border border-indigo-500/30 text-slate-100 shadow-sm"
                       : "hover:bg-slate-900/60 border border-transparent text-slate-400 hover:text-slate-200"
-                  }`}
+                    }`}
                 >
                   <MessageSquare className={`w-4 h-4 mt-0.5 shrink-0 ${isSelected ? "text-indigo-400" : "text-slate-500"}`} />
                   <div className="flex-1 min-w-0">

@@ -1,4 +1,4 @@
-# Antigravity Agent Enterprise Platform
+# X Agent Enterprise Platform
 
 > 一个基于 **LangGraph 原生架构** 驱动的 **LLM Agent 任务调度与人机协同企业级平台**。原生具备 **LangGraph StateGraph 状态机、人机协同审批（HITL Interrupt / Resume）、安全隔离沙箱（Go Daemon + Docker）、Chromium 浏览器 CDP 自动化、模型上下文协议（MCP）、多智能体协同（A2A）、双层纵深鉴权、服务端真实物理 Cancel、文件多版本管理与极致前端流式动静分离**。
 

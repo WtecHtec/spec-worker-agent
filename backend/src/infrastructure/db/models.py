@@ -52,6 +52,7 @@ class SessionModel(Base):
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    thread_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     user: Mapped["UserModel"] = relationship(back_populates="sessions")
     messages: Mapped[list["MessageModel"]] = relationship(back_populates="session")

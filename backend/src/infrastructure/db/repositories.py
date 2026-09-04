@@ -124,7 +124,9 @@ class SessionRepository(ISessionRepository):
         self.db = db
 
     async def create(self, user_id: str, title: Optional[str] = "新会话", agent_config: Optional[dict] = None) -> Session:
-        m = SessionModel(user_id=user_id, title=title, agent_config=agent_config or {})
+        from src.infrastructure.db.models import gen_uuid
+        sid = gen_uuid()
+        m = SessionModel(id=sid, thread_id=sid, user_id=user_id, title=title, agent_config=agent_config or {})
         self.db.add(m)
         await self.db.flush()
         return to_session(m)

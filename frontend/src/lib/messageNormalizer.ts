@@ -10,6 +10,7 @@ export interface NormalizedStep {
   toolName: string;
   args: Record<string, any>;
   output?: string;
+  thought?: string;
 }
 
 export interface NormalizedTurn {
@@ -127,21 +128,29 @@ export function groupMessagesIntoTurns(rawMessages: any[]): NormalizedTurn[] {
       }
       currentAgentTurn.rawMessages.push(msg);
 
-      // 提取工具调用
-      if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
-        for (const tc of msg.tool_calls) {
-          currentAgentTurn.steps!.push({
-            toolCallId: tc.id || `tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            toolName: tc.name,
-            args: tc.args || {},
-          });
-        }
-      }
+      const text = extractMessageText(msg);
 
-      // 关联工具返回结果
-      if (role === "tool") {
+      if (role === "agent") {
+        if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+          // 提取工具调用，并将伴随该批工具调用的思考/说明正文注入到步骤中
+          for (let tcIdx = 0; tcIdx < msg.tool_calls.length; tcIdx++) {
+            const tc = msg.tool_calls[tcIdx];
+            currentAgentTurn.steps!.push({
+              toolCallId: tc.id || `tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              toolName: tc.name,
+              args: tc.args || {},
+              // 仅在当前批次第一个工具上挂载说明文本，避免多工具并行时文字重复
+              thought: tcIdx === 0 ? (text || undefined) : undefined,
+            });
+          }
+        } else if (text) {
+          // 纯文本回复（阶段小结或最终回答）
+          currentAgentTurn.content = text;
+        }
+      } else if (role === "tool") {
+        // 关联工具返回结果
         const toolCallId = msg.tool_call_id;
-        const output = extractMessageText(msg);
+        const output = text;
         const matched = currentAgentTurn.steps!.find((s) => s.toolCallId === toolCallId);
         if (matched) {
           matched.output = output;
@@ -153,12 +162,7 @@ export function groupMessagesIntoTurns(rawMessages: any[]): NormalizedTurn[] {
             output,
           });
         }
-      }
-
-      // 提取最新的正文文本
-      const text = extractMessageText(msg);
-      if (text) {
-        currentAgentTurn.content = text;
+        // 注意：Tool 产出绝不能覆盖 currentAgentTurn.content！
       }
     }
   }

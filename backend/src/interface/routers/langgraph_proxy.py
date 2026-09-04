@@ -286,13 +286,22 @@ async def _ensure_thread_in_upstream(thread_id: str, user_id: str):
     try:
         resp = await client.post(
             url,
-            json={"thread_id": thread_id, "metadata": {"owner": user_id}},
+            json={"thread_id": thread_id, "metadata": {"owner": user_id, "graph_id": "agent"}},
             headers=headers,
         )
         if resp.status_code in (200, 201):
             logger.info("thread_created_in_upstream", thread_id=thread_id, owner=user_id)
         elif resp.status_code == 409:
             logger.debug("thread_already_exists_upstream", thread_id=thread_id)
+            # 补齐 metadata 确保包含 graph_id，防止 .langgraph_api 被清理后缺少 graph_id 导致无法查历史
+            try:
+                await client.patch(
+                    f"{url}/{thread_id}",
+                    json={"metadata": {"owner": user_id, "graph_id": "agent"}},
+                    headers=headers,
+                )
+            except Exception:
+                pass
         else:
             logger.error(
                 "thread_create_upstream_failed",

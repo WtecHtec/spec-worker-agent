@@ -127,7 +127,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
           };
         }
       }
-    } catch (_) {}
+    } catch (_) { }
 
     return null;
   };
@@ -188,7 +188,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
           {/* 状态顶栏 */}
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/80 text-xs">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-200 text-xs">Antigravity Agent</span>
+              <span className="font-semibold text-slate-200 text-xs">X Agent</span>
               {taskStatus === "RUNNING" && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 animate-pulse font-mono">
                   <Clock className="w-2.5 h-2.5" />
@@ -224,6 +224,37 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
               <span className="text-[10px] text-slate-500 font-mono">{formattedTime}</span>
             )}
           </div>
+
+          {/* 步骤伴随的 AI 思考/执行思路说明（展示 tool_calls 携带的说明正文） */}
+          {message.steps && Array.isArray(message.steps) && message.steps.some((s: any) => s.thought) && (
+            <div className="mb-3 space-y-2.5">
+              {message.steps
+                .filter((s: any) => s.thought)
+                .map((step: any, idx: number) => (
+                  <div key={step.toolCallId || idx} className="prose prose-invert prose-sm max-w-none text-slate-100 text-sm leading-relaxed font-sans">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        code({ className, children, ...props }) {
+                          const match = /language-(\w+)/.exec(className || "");
+                          const isInline = !match && !String(children).includes("\n");
+                          if (isInline) {
+                            return (
+                              <code className="px-1.5 py-0.5 rounded-md bg-slate-800 text-indigo-300 font-mono text-xs border border-slate-700 select-text" {...props}>
+                                {children}
+                              </code>
+                            );
+                          }
+                          return <CodeBlock language={match ? match[1] : ""} value={String(children).replace(/\n$/, "")} />;
+                        },
+                      }}
+                    >
+                      {step.thought}
+                    </ReactMarkdown>
+                  </div>
+                ))}
+            </div>
+          )}
 
           {/* 整合工具步骤折叠栏（将 tool 产出与 tool_calls 步骤无缝缝合） */}
           {message.steps && Array.isArray(message.steps) && message.steps.length > 0 && (
@@ -300,8 +331,8 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
           ) : (
             // 2. 历史消息：Markdown 结构化渲染正文回复 + 折叠懒加载步骤详情
             <div className="space-y-3">
-              {/* 正文 Markdown 渲染 */}
-              {messageText ? (
+              {/* 正文 Markdown 渲染（若内容已在 step.thought 中展示，则避免重复呈现） */}
+              {messageText && (!message.steps || !message.steps.some((s: any) => s.thought === messageText)) ? (
                 <div className="prose prose-invert prose-sm max-w-none text-slate-100 text-sm leading-relaxed font-sans">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}

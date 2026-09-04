@@ -41,7 +41,7 @@ export const AuthModal: React.FC = () => {
             <Bot className="w-6 h-6" />
           </div>
           <h2 className="text-xl font-bold text-slate-100">
-            {isRegister ? "注册新账号" : "登录 Antigravity Agent"}
+            {isRegister ? "注册新账号" : "登录 X Agent"}
           </h2>
           <p className="text-xs text-slate-400 mt-1">
             企业级 Agent 任务流调度与人机协同平台

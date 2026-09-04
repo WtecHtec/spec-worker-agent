@@ -1,4 +1,4 @@
-# Antigravity Agent - 前端客户端 (Frontend)
+# X Agent - 前端客户端 (Frontend)
 
 基于 **Next.js 14 (App Router) + Tailwind CSS + Zustand + Framer Motion + React Markdown** 构建的高性能企业级 Agent 交互客户端。
 

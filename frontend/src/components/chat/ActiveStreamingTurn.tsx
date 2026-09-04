@@ -49,7 +49,7 @@ export const ActiveStreamingTurn: React.FC<ActiveStreamingTurnProps> = ({ turn, 
           {/* 状态顶栏：高亮展示正在流式执行中 */}
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/80 text-xs">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-200 text-xs">Antigravity Agent</span>
+              <span className="font-semibold text-slate-200 text-xs">X Agent</span>
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 animate-pulse font-mono">
                 <Clock className="w-2.5 h-2.5 animate-spin" />
                 正在深度思考与执行...
@@ -57,6 +57,37 @@ export const ActiveStreamingTurn: React.FC<ActiveStreamingTurnProps> = ({ turn, 
             </div>
             <span className="text-[10px] text-indigo-400/80 font-mono">实时流式</span>
           </div>
+
+          {/* 步骤前已产生的 AI 思考/说明正文（展示 tool_calls 携带的说明正文） */}
+          {turn.steps && turn.steps.some((s) => s.thought) && (
+            <div className="mb-3 space-y-2">
+              {turn.steps
+                .filter((s) => s.thought)
+                .map((step, idx) => (
+                  <div key={step.toolCallId || idx} className="prose prose-invert prose-sm max-w-none text-slate-100 text-sm leading-relaxed font-sans">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        code({ className, children, ...props }) {
+                          const match = /language-(\w+)/.exec(className || "");
+                          const isInline = !match && !String(children).includes("\n");
+                          if (isInline) {
+                            return (
+                              <code className="px-1.5 py-0.5 rounded-md bg-slate-800 text-indigo-300 font-mono text-xs border border-slate-700 select-text" {...props}>
+                                {children}
+                              </code>
+                            );
+                          }
+                          return <CodeBlock language={match ? match[1] : ""} value={String(children).replace(/\n$/, "")} />;
+                        },
+                      }}
+                    >
+                      {step.thought}
+                    </ReactMarkdown>
+                  </div>
+                ))}
+            </div>
+          )}
 
           {/* 正在执行的动态步骤折叠卡片 */}
           {turn.steps && turn.steps.length > 0 && (
@@ -107,8 +138,8 @@ export const ActiveStreamingTurn: React.FC<ActiveStreamingTurnProps> = ({ turn, 
             </div>
           )}
 
-          {/* 实时 Markdown 打字正文 */}
-          {turn.content ? (
+          {/* 实时 Markdown 打字正文（若已在步骤 thought 中呈现则避免重复） */}
+          {turn.content && (!turn.steps || !turn.steps.some((s) => s.thought === turn.content)) ? (
             <div className="prose prose-invert prose-sm max-w-none text-slate-100 text-sm leading-relaxed font-sans">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}

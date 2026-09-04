@@ -255,7 +255,7 @@ export const ChatWindow: React.FC = () => {
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white mb-4 shadow-xl shadow-indigo-950/50">
               <Bot className="w-7 h-7" />
             </div>
-            <h2 className="text-lg font-bold text-slate-100 mb-1.5">欢迎使用 Antigravity Agent</h2>
+            <h2 className="text-lg font-bold text-slate-100 mb-1.5">欢迎使用 X Agent</h2>
             <p className="text-xs text-slate-400 mb-6 leading-relaxed">
               全链路企业级 Agent 交互平台，完全由 LangGraph 官方流式架构驱动。
             </p>
