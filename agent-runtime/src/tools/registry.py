@@ -5,6 +5,13 @@ from .sandbox import SandboxRunCommandTool, SandboxReadFileTool, SandboxWriteFil
 from .mcp_adapter import McpClient, McpToolAdapter
 from .a2a_adapter import A2AClientWrapper, A2AToolAdapter
 from .hitl import HitlRequestTool
+from .browser import (
+    BrowserOpenPageTool,
+    BrowserClosePageTool,
+    BrowserGetSnapshotTool,
+    BrowserClickTool,
+    BrowserScreenshotTool,
+)
 
 
 class ToolRegistry:
@@ -77,4 +84,9 @@ def create_default_registry() -> ToolRegistry:
     reg.register(SandboxReadFileTool())
     reg.register(SandboxWriteFileTool())
     reg.register(HitlRequestTool())
+    reg.register(BrowserOpenPageTool())
+    reg.register(BrowserClosePageTool())
+    reg.register(BrowserGetSnapshotTool())
+    reg.register(BrowserClickTool())
+    reg.register(BrowserScreenshotTool())
     return reg
