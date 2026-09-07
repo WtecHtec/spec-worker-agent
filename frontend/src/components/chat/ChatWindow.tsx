@@ -37,6 +37,7 @@ export const ChatWindow: React.FC = () => {
     cancel,
     messages,
     getHistory,
+    activeNode,
   } = useLangGraphStream({
     threadId: currentSessionId,
     token,
@@ -287,6 +288,7 @@ export const ChatWindow: React.FC = () => {
             {activeTurn && (
               <ActiveStreamingTurn
                 turn={activeTurn}
+                activeNode={activeNode}
                 onScrollBottom={() => scrollToBottom(false)}
               />
             )}

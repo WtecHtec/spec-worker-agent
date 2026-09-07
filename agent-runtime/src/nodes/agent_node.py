@@ -56,7 +56,8 @@ def ensure_invalidation_listener():
 async def agent_node(state: AgentState, config: RunnableConfig | None = None):
     """
     ReAct 思考与决策节点（多租户按需绑定工具）：
-    - 检查首条消息是否存在 SystemMessage，若无则自动注入规范的 ReAct 思考提示词；
+    - 结合 active_cut_index 游标切取近期活跃工作窗口，将 summary 注入 System Prompt，防 Token 溢出；
+    - 检查首条消息是否存在 SystemMessage，若无则自动注入规范的 ReAct 思考提示词与记忆摘要；
     - 从上下文提取当前用户 ID；
     - 纯内存极速拉取专属 ToolRegistry（含内置、沙箱与该用户专属配置的 MCP/A2A 工具）；
     - 动态通过 bind_tools 绑定至 LLM 并执行推理。
@@ -66,17 +67,33 @@ async def agent_node(state: AgentState, config: RunnableConfig | None = None):
     auth_user = configurable.get("langgraph_auth_user", {})
     user_id = auth_user.get("identity") if auth_user else "local_user"
 
-    messages = list(state.get("messages", []))
+    all_messages = list(state.get("messages", []))
+    cut_index = state.get("active_cut_index", 0)
+    summary = state.get("summary", "")
 
-    # 注入系统提示词（保证 ReAct 准则生效）
-    if not messages or not isinstance(messages[0], SystemMessage):
-        system_prompt = build_system_prompt(user_id=user_id)
-        messages = [SystemMessage(content=system_prompt)] + messages
+    # 提取近期活跃窗口消息（0 代表全量）
+    if cut_index > 0 and cut_index < len(all_messages):
+        working_messages = all_messages[cut_index:]
+    else:
+        working_messages = list(all_messages)
+
+
+
+    # 注入系统提示词与记忆摘要（保证 ReAct 准则与中期记忆生效）
+    if not working_messages or not isinstance(working_messages[0], SystemMessage):
+        system_prompt = build_system_prompt(user_id=user_id, context_summary=summary)
+        inference_messages = [SystemMessage(content=system_prompt)] + working_messages
+    else:
+        # 若已有 SystemMessage，更新其内容包含最新 summary
+        system_prompt = build_system_prompt(user_id=user_id, context_summary=summary)
+        inference_messages = [SystemMessage(content=system_prompt)] + working_messages[1:]
+
 
     # 多租户动态获取当前用户的专属可用工具
     registry = await user_tool_registry_manager.get_registry_for_user(user_id)
     openai_tools = registry.get_openai_tools()
 
     bound_llm = llm.bind_tools(openai_tools) if openai_tools else llm
-    response = await bound_llm.ainvoke(messages, config=config)
+    response = await bound_llm.ainvoke(inference_messages, config=config)
     return {"messages": [response]}
+

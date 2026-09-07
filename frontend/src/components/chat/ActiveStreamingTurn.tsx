@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useRef, useEffect, useState } from "react";
-import { Bot, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import { Bot, Clock, ChevronDown, ChevronUp, Brain } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "@/components/ui/CodeBlock";
@@ -9,6 +9,7 @@ import { NormalizedTurn } from "@/lib/messageNormalizer";
 
 interface ActiveStreamingTurnProps {
   turn: NormalizedTurn;
+  activeNode?: string | null;
   onScrollBottom?: () => void;
 }
 
@@ -16,7 +17,11 @@ interface ActiveStreamingTurnProps {
  * 独立的活动流式叶子组件：
  * 将高频 Token 拼装与步骤卡片完全隔离在此组件内部，历史消息 0 重绘！
  */
-export const ActiveStreamingTurn: React.FC<ActiveStreamingTurnProps> = ({ turn, onScrollBottom }) => {
+export const ActiveStreamingTurn: React.FC<ActiveStreamingTurnProps> = ({
+  turn,
+  activeNode,
+  onScrollBottom,
+}) => {
   const [isStepsExpanded, setIsStepsExpanded] = useState(true);
   const rafIdRef = useRef<number | null>(null);
 
@@ -50,13 +55,21 @@ export const ActiveStreamingTurn: React.FC<ActiveStreamingTurnProps> = ({ turn, 
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/80 text-xs">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-slate-200 text-xs">X Agent</span>
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 animate-pulse font-mono">
-                <Clock className="w-2.5 h-2.5 animate-spin" />
-                正在深度思考与执行...
-              </span>
+              {activeNode === "context_compressor" ? (
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 animate-pulse font-mono">
+                  <Brain className="w-2.5 h-2.5 animate-bounce text-purple-400" />
+                  历史对话较长，正在提炼中期结构化记忆...
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 animate-pulse font-mono">
+                  <Clock className="w-2.5 h-2.5 animate-spin" />
+                  正在深度思考与执行...
+                </span>
+              )}
             </div>
             <span className="text-[10px] text-indigo-400/80 font-mono">实时流式</span>
           </div>
+
 
           {/* 步骤前已产生的 AI 思考/说明正文（展示 tool_calls 携带的说明正文） */}
           {turn.steps && turn.steps.some((s) => s.thought) && (

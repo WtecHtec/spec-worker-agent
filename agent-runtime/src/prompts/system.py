@@ -20,11 +20,22 @@ REACT_SYSTEM_PROMPT = """你是一个具备高级人机协同（Human-In-The-Loo
 """
 
 
-def build_system_prompt(workspace_dir: str = "./workspace", user_id: str | None = None) -> str:
-    """动态组装包含当前时间与用户租户上下文的 System Prompt"""
+def build_system_prompt(
+    workspace_dir: str = "./workspace",
+    user_id: str | None = None,
+    context_summary: str | None = None,
+) -> str:
+    """动态组装包含当前时间、用户租户上下文及历史中期记忆摘要的 System Prompt"""
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     prompt = (
         REACT_SYSTEM_PROMPT
         + f"\n\n## 运行时上下文\n- 当前工作空间根目录: `{workspace_dir}`\n- 当前系统时间: {now}\n- 当前用户标识: {user_id or 'anonymous'}\n"
     )
+    if context_summary and context_summary.strip():
+        prompt += (
+            f"\n\n## 历史对话与阶段成果摘要 (Memory Summary)\n"
+            f"以下是更早之前经过压缩归纳的对话背景、关键约束与阶段性执行产物：\n"
+            f"{context_summary.strip()}\n"
+        )
     return prompt
+

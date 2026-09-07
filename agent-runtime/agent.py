@@ -9,19 +9,21 @@ from langgraph.graph import StateGraph, START, END
 load_dotenv()
 
 from src.state import AgentState
-from src.nodes import agent_node, tools_node
+from src.nodes import agent_node, tools_node, context_compressor_node
 from src.edges import should_continue
 
 # 1. 初始化状态图
 builder = StateGraph(AgentState)
 
 # 2. 注册图节点
+builder.add_node("context_compressor", context_compressor_node)
 builder.add_node("agent_node", agent_node)
 builder.add_node("tools_node", tools_node)
 
-# 3. 编排图拓扑（经典健壮的 ReAct 闭环）
-# START -> agent_node -> should_continue -> (tools_node -> agent_node) / END
-builder.add_edge(START, "agent_node")
+# 3. 编排图拓扑（经典健壮的 ReAct 闭环 + 显式上下文治理）：
+# START -> context_compressor -> agent_node -> should_continue -> (tools_node -> agent_node) / END
+builder.add_edge(START, "context_compressor")
+builder.add_edge("context_compressor", "agent_node")
 builder.add_conditional_edges(
     "agent_node",
     should_continue,

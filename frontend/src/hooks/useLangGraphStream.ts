@@ -9,7 +9,7 @@
  * - cancel() 同时调用 stream.stop()（停止前端渲染）+ 网关真实 Cancel 接口
  */
 
-import { useMemo, useRef, useCallback } from "react";
+import { useMemo, useRef, useCallback, useState } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { Client, type ThreadState } from "@langchain/langgraph-sdk";
 import { API_BASE } from "@/lib/api";
@@ -48,6 +48,8 @@ export function useLangGraphStream({
   onError,
 }: UseLangGraphStreamOptions) {
   const activeRunIdRef = useRef<string | null>(null);
+  const [activeNode, setActiveNode] = useState<string | null>(null);
+
 
   const authHeaders: Record<string, string> = useMemo(() => {
     const headers: Record<string, string> = {};
@@ -101,13 +103,17 @@ export function useLangGraphStream({
       onRunCreated?.(run.run_id);
     }, [onRunCreated]),
 
-    // 每次 state chunk 更新时触发（对齐 LangGraph event: updates 协议：data 为 {"llm_node": {"messages": [...]}}）
+    // 每次 state chunk 更新时触发（对齐 LangGraph event: updates 协议：data 为 {"node_name": {...}}）
     onUpdateEvent: useCallback((data: any) => {
       let extracted: any[] = [];
       if (Array.isArray(data?.messages)) {
         extracted = data.messages;
       } else if (data && typeof data === "object") {
         for (const key of Object.keys(data)) {
+          // 捕获活跃节点名称（如 context_compressor, agent_node, tools_node）
+          if (key && key !== "messages") {
+            setActiveNode(key);
+          }
           const val = data[key];
           if (val && typeof val === "object" && Array.isArray(val.messages)) {
             extracted.push(...val.messages);
@@ -134,14 +140,17 @@ export function useLangGraphStream({
       }
       onFinish?.(extracted);
       activeRunIdRef.current = null;
+      setActiveNode(null);
     }, [onFinish]),
 
     onError: useCallback((err: unknown) => {
       const error = err instanceof Error ? err : new Error(String(err));
       onError?.(error);
       activeRunIdRef.current = null;
+      setActiveNode(null);
     }, [onError]),
   });
+
 
   /**
    * 发送用户消息（触发新一轮 LLM 推理）
@@ -179,6 +188,7 @@ export function useLangGraphStream({
       }
     }
     activeRunIdRef.current = null;
+    setActiveNode(null);
   }, [stream, threadId, token]);
 
   /**
@@ -205,6 +215,8 @@ export function useLangGraphStream({
   return {
     /** 当前 LLM 推理是否正在进行 */
     isLoading: stream.isLoading,
+    /** 当前活跃执行的 LangGraph 节点名称（如 context_compressor, agent_node, tools_node） */
+    activeNode,
     /** 当前流式消息列表（由 SDK 内部自动合并维护） */
     messages: stream.messages,
     /** 发送用户消息 */
@@ -229,3 +241,4 @@ export function useLangGraphStream({
     rawStream: stream,
   };
 }
+
