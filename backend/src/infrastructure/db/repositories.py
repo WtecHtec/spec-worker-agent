@@ -1,6 +1,7 @@
 from typing import cast, Optional
 from datetime import datetime, timezone
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, or_
+from sqlalchemy.orm import selectinload, attributes
 
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,16 +9,18 @@ from src.infrastructure.db.models import (
     UserModel, SessionModel, MessageModel,
     TaskModel, TaskStepModel, TaskCheckpointModel, HitlRequestModel,
     EcosystemConfigModel, FileModel, FileVersionModel,
+    MessageTraceModel, TraceSpanModel,
 )
 from src.domain.entities.models import (
     User, Session, Message, Task, TaskStep, Checkpoint, HitlRequest,
-    SessionFile, FileVersion,
+    SessionFile, FileVersion, TraceSpan, MessageTrace,
 )
 from src.domain.repositories.user import IUserRepository
 from src.domain.repositories.session import ISessionRepository, IMessageRepository
 from src.domain.repositories.task import ITaskRepository, ITaskStepRepository, ICheckpointRepository
 from src.domain.repositories.hitl import IHitlRepository
 from src.domain.repositories.file import IFileRepository
+from src.domain.repositories.trace import ITraceRepository
 
 
 # ─── Mappers ──────────────────────────────────────────────────
@@ -89,6 +92,55 @@ def to_file(m: FileModel) -> SessionFile:
         is_deleted=m.is_deleted,
         created_at=m.created_at,
         updated_at=m.updated_at,
+    )
+
+
+def to_span(m: TraceSpanModel) -> TraceSpan:
+    return TraceSpan(
+        id=m.id,
+        trace_id=m.trace_id,
+        name=m.name,
+        type=m.type,
+        status=m.status,
+        parent_span_id=m.parent_span_id,
+        start_time=m.start_time,
+        end_time=m.end_time,
+        duration_ms=m.duration_ms,
+        tokens=m.tokens,
+        input_data=m.input_data,
+        output_data=m.output_data,
+        error_message=m.error_message,
+        reported_at=m.reported_at,
+    )
+
+
+def to_trace(m: MessageTraceModel) -> MessageTrace:
+    # 安全获取关系属性，避免未预加载时在 asyncpg 异步环境下隐式触发 MissingGreenlet
+    state = attributes.instance_state(m)
+    if "spans" in state.dict and m.spans:
+        raw_spans = m.spans
+    else:
+        raw_spans = []
+
+    sorted_spans = sorted(
+        raw_spans,
+        key=lambda s: s.start_time or datetime.min.replace(tzinfo=timezone.utc)
+    )
+    return MessageTrace(
+        id=m.id,
+        session_id=m.session_id,
+        run_id=m.run_id,
+        status=m.status,
+        message_id=m.message_id,
+        total_duration_ms=m.total_duration_ms,
+        total_tokens=m.total_tokens,
+        prompt_tokens=m.prompt_tokens,
+        completion_tokens=m.completion_tokens,
+        model_name=m.model_name,
+        tool_calls_count=m.tool_calls_count,
+        reported_at=m.reported_at,
+        created_at=m.created_at,
+        spans=[to_span(s) for s in sorted_spans],
     )
 
 
@@ -743,5 +795,94 @@ class FileVersionRepository:
         res = await self.db.execute(stmt)
         m = res.scalar_one_or_none()
         return to_file_version(m) if m else None
+
+
+class TraceRepository(ITraceRepository):
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_by_identifier(
+        self, identifier: str, user_id: Optional[str] = None
+    ) -> Optional[MessageTrace]:
+        """
+        基于标识（trace_id / run_id / message_id / session_id）查询 Trace 聚合及其 Spans：
+        1. 在 message_traces 表中按 id / run_id / message_id 精准匹配；
+        2. 若传入的是 session_id，则按时间倒序获取该会话最新 Trace；
+        3. 强制结合 SessionModel.user_id 实施多租户隔离。
+        """
+        clean_id = identifier.removeprefix("lc_run--").strip()
+        possible_ids = list({identifier, clean_id, f"lc_run--{clean_id}"})
+
+        base_query = (
+            select(MessageTraceModel)
+            .options(selectinload(MessageTraceModel.spans))
+            .join(SessionModel, MessageTraceModel.session_id == SessionModel.id, isouter=True)
+        )
+
+        conditions = [
+            or_(
+                MessageTraceModel.id.in_(possible_ids),
+                MessageTraceModel.run_id.in_(possible_ids),
+                MessageTraceModel.message_id.in_(possible_ids),
+            )
+        ]
+        if user_id:
+            conditions.append(SessionModel.user_id == user_id)
+
+        stmt = base_query.where(*conditions).order_by(MessageTraceModel.created_at.desc())
+        res = await self.db.execute(stmt)
+        trace_model = res.scalars().first()
+
+        # 2. 第二级：若主表未直接命中，通过 trace_spans 反查所属母 trace_id
+        # （涵盖子 span_id、parent_span_id 以及 output_data/input_data 中记录的 message_id）
+        if not trace_model:
+            span_sub = (
+                select(TraceSpanModel.trace_id)
+                .where(
+                    or_(
+                        TraceSpanModel.id.in_(possible_ids),
+                        TraceSpanModel.parent_span_id.in_(possible_ids),
+                        TraceSpanModel.output_data["message_id"].astext.in_(possible_ids),
+                    )
+                )
+                .limit(1)
+            )
+            span_res = await self.db.execute(span_sub)
+            parent_trace_id = span_res.scalar_one_or_none()
+            if parent_trace_id:
+                sub_conds = [MessageTraceModel.id == parent_trace_id]
+                if user_id:
+                    sub_conds.append(SessionModel.user_id == user_id)
+                stmt_span = base_query.where(*sub_conds)
+                res_span = await self.db.execute(stmt_span)
+                trace_model = res_span.scalars().first()
+
+        # 3. 第三级兜底：若直接传入的是 session_id，返回该会话最新的一条 Trace
+        if not trace_model:
+            sess_conditions = [MessageTraceModel.session_id.in_(possible_ids)]
+            if user_id:
+                sess_conditions.append(SessionModel.user_id == user_id)
+            stmt_sess = base_query.where(*sess_conditions).order_by(MessageTraceModel.created_at.desc())
+            res_sess = await self.db.execute(stmt_sess)
+            trace_model = res_sess.scalars().first()
+
+        return to_trace(trace_model) if trace_model else None
+
+    async def list_by_session_id(
+        self, session_id: str, user_id: Optional[str] = None
+    ) -> list[MessageTrace]:
+        """获取指定会话下的所有已上报 Trace 摘要列表（严格租户隔离）"""
+        stmt = (
+            select(MessageTraceModel)
+            .options(selectinload(MessageTraceModel.spans))
+            .join(SessionModel, MessageTraceModel.session_id == SessionModel.id, isouter=True)
+            .where(MessageTraceModel.session_id == session_id)
+        )
+        if user_id:
+            stmt = stmt.where(SessionModel.user_id == user_id)
+
+        stmt = stmt.order_by(MessageTraceModel.reported_at.asc())
+        result = await self.db.execute(stmt)
+        return [to_trace(m) for m in result.scalars().all()]
 
 

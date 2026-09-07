@@ -5,7 +5,8 @@ import { useSessionStore } from "@/store/useSessionStore";
 import { useFileStore } from "@/store/useFileStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { usePreviewStore } from "@/store/usePreviewStore";
-import { Wifi, WifiOff, Activity, FolderArchive, Globe } from "lucide-react";
+import { useTraceStore } from "@/store/useTraceStore";
+import { Wifi, WifiOff, Activity, FolderArchive, Globe, Sparkles } from "lucide-react";
 
 export const Header: React.FC = () => {
   const sessions = useSessionStore((state) => state.sessions);
@@ -88,6 +89,18 @@ export const Header: React.FC = () => {
                 {fileTotal}
               </span>
             )}
+          </button>
+        )}
+
+        {/* 执行历程与甘特图快捷入口 */}
+        {currentSessionId && (
+          <button
+            onClick={() => useTraceStore.getState().openTrace(currentSessionId)}
+            title="查看当前会话 Trace 历程与甘特图"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-all group shadow-sm"
+          >
+            <Activity className="w-3.5 h-3.5 text-indigo-400 group-hover:scale-110 transition-transform" />
+            <span>甘特图 Trace</span>
           </button>
         )}
 

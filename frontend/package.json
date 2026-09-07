@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@langchain/langgraph-sdk": "^1.10.0",
+    "@visactor/vchart": "^2.1.6",
+    "@visactor/vtable": "^1.26.7",
+    "@visactor/vtable-gantt": "^1.26.7",
     "@webcontainer/api": "^1.6.4",
     "clsx": "^2.1.1",
     "framer-motion": "^13.1.1",

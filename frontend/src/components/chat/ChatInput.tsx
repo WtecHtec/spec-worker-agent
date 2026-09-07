@@ -25,8 +25,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   activeTaskId = null,
 }) => {
   const [content, setContent] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isComposingRef = useRef(false);
+  const lastSendTimeRef = useRef(0);
   const token = useAuthStore((state) => state.token);
 
   const updateMessageByTaskId = useSessionStore((state) => state.updateMessageByTaskId);
@@ -40,18 +43,46 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
   }, [content]);
 
+  // 当外部 streaming / sending 结束时，重置本地提交锁
+  useEffect(() => {
+    if (!isSending && !isStreaming) {
+      setIsSubmitting(false);
+    }
+  }, [isSending, isStreaming]);
+
   const handleSend = async () => {
-    const busy = isSending || isStreaming || !!activeTaskId;
+    const now = Date.now();
+    // 600ms 防抖节流保护，防止用户连击
+    if (now - lastSendTimeRef.current < 600) {
+      return;
+    }
+
+    const busy = isSubmitting || isSending || isStreaming || !!activeTaskId;
     if (!content.trim() || busy) return;
+
+    // 立即同步上锁，彻底杜绝重复提交
+    setIsSubmitting(true);
+    lastSendTimeRef.current = now;
+
     const text = content.trim();
     setContent("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-    await onSendMessage(text);
+
+    try {
+      await onSendMessage(text);
+    } catch (err) {
+      setIsSubmitting(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 处理输入法拼音候选词回车：避免中文拼音输入选字时误发消息
+    if (e.nativeEvent.isComposing || isComposingRef.current) {
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -82,7 +113,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
 
-  const isActive = isStreaming || !!activeTaskId;
+  const isActive = isStreaming || isSubmitting || isSending || !!activeTaskId;
 
   const QUICK_PROMPTS = [
     { title: "📄 创建文件", text: "请在沙箱中帮我创建一个 utils.py 文件，编写常用日期格式化与字符串处理函数并打印输出。" },
@@ -116,10 +147,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            isComposingRef.current = false;
+          }}
           disabled={isActive}
           placeholder={
             isActive
-              ? "正在生成中，点击右侧按钮可停止..."
+              ? "正在处理中..."
               : "输入您想问的问题... (Enter 发送，Shift+Enter 换行)"
           }
           rows={1}
@@ -127,7 +164,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         />
 
         <div className="absolute right-2.5 bottom-2.5 flex items-center gap-1.5">
-          {isActive ? (
+          {isStreaming || !!activeTaskId ? (
             <button
               onClick={handleCancelTask}
               disabled={isCancelling}
@@ -147,7 +184,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               disabled={!content.trim() || isActive}
               className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shadow-md shadow-indigo-900/40 active:scale-95"
             >
-              {isSending ? (
+              {isSending || isSubmitting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Send className="w-4 h-4" />

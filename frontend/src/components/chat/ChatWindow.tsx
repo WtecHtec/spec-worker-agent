@@ -102,12 +102,33 @@ export const ChatWindow: React.FC = () => {
     isUserScrolledUpRef.current = distanceToBottom > 80;
   }, []);
 
+  const isLoadingMoreRef = useRef<boolean>(false);
+  const hasMoreHistoryRef = useRef<boolean>(true);
+  const hasInitialScrolledRef = useRef<boolean>(false);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  hasMoreHistoryRef.current = hasMoreDatabaseHistory;
+
+  // 核心：当进入新会话且消息首次加载出来时，强制自动吸底
+  useEffect(() => {
+    if (mergedMessages.length > 0 && !hasInitialScrolledRef.current) {
+      hasInitialScrolledRef.current = true;
+      isUserScrolledUpRef.current = false;
+      requestAnimationFrame(() => {
+        scrollToBottom(true);
+        setTimeout(() => {
+          scrollToBottom(true);
+        }, 60);
+      });
+    }
+  }, [mergedMessages.length, scrollToBottom]);
+
   // 2. 核心：调用官方 client.threads.getHistory 从数据库拉取更早的 Checkpoints 历史
   const loadPreviousHistory = useCallback(async () => {
-    if (isLoadingMore || !hasMoreDatabaseHistory || !currentSessionId) return;
+    if (isLoadingMoreRef.current || !hasMoreHistoryRef.current || !currentSessionId) return;
     const container = scrollContainerRef.current;
     if (!container) return;
 
+    isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     const prevScrollHeight = container.scrollHeight;
 
@@ -120,6 +141,7 @@ export const ChatWindow: React.FC = () => {
 
       if (!states || states.length === 0) {
         setHasMoreDatabaseHistory(false);
+        hasMoreHistoryRef.current = false;
       } else {
         // 提取这些 Checkpoints 中包含的消息
         const olderMessages: any[] = [];
@@ -139,6 +161,7 @@ export const ChatWindow: React.FC = () => {
 
         if (states.length < 10) {
           setHasMoreDatabaseHistory(false);
+          hasMoreHistoryRef.current = false;
         }
 
         if (olderMessages.length > 0) {
@@ -157,33 +180,65 @@ export const ChatWindow: React.FC = () => {
     } catch (err) {
       console.error("[ChatWindow] Load previous history from database failed:", err);
     } finally {
-      setIsLoadingMore(false);
+      // 增加 300ms 冷却缓冲，防止用户快速滚动连续高频并发
+      setTimeout(() => {
+        isLoadingMoreRef.current = false;
+        setIsLoadingMore(false);
+      }, 300);
     }
-  }, [isLoadingMore, hasMoreDatabaseHistory, currentSessionId, earliestCheckpointId, getHistory]);
+  }, [currentSessionId, earliestCheckpointId, getHistory]);
 
-  // 使用 IntersectionObserver 监听顶部哨兵触顶
+  // 使用 IntersectionObserver 监听顶部哨兵触顶，配合 200ms 防抖处理
   useEffect(() => {
     const sentinel = topSentinelRef.current;
     if (!sentinel) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMoreDatabaseHistory && !isLoadingMore) {
-          loadPreviousHistory();
+        const container = scrollContainerRef.current;
+        // 关键保护：只有在已经完成首次展示吸底，且容器确实可以滚动（高度超出一屏）时，触顶才视为有效向上翻阅历史
+        const canScroll = container && container.scrollHeight > container.clientHeight + 40;
+        if (
+          entries[0].isIntersecting &&
+          hasInitialScrolledRef.current &&
+          canScroll &&
+          hasMoreHistoryRef.current &&
+          !isLoadingMoreRef.current
+        ) {
+          if (debounceTimerRef.current) {
+            clearTimeout(debounceTimerRef.current);
+          }
+          debounceTimerRef.current = setTimeout(() => {
+            if (hasMoreHistoryRef.current && !isLoadingMoreRef.current) {
+              loadPreviousHistory();
+            }
+          }, 200);
         }
       },
       { root: scrollContainerRef.current, threshold: 0.1 }
     );
 
     observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [loadPreviousHistory, hasMoreDatabaseHistory, isLoadingMore]);
+    return () => {
+      observer.disconnect();
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [loadPreviousHistory]);
 
   // 会话切换时重置所有数据库游标、消息与审批状态
   useEffect(() => {
     setDatabaseMessages([]);
     setEarliestCheckpointId(undefined);
     setHasMoreDatabaseHistory(true);
+    hasMoreHistoryRef.current = true;
+    hasInitialScrolledRef.current = false;
+    isLoadingMoreRef.current = false;
+    setIsLoadingMore(false);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
     setSubmittedRequestIds({});
     isUserScrolledUpRef.current = false;
     requestAnimationFrame(() => scrollToBottom(true));

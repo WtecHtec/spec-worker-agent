@@ -11,6 +11,7 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
+  Activity,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -20,6 +21,7 @@ import { StepContainer } from "../steps/StepContainer";
 import { CodeBlock } from "@/components/ui/CodeBlock";
 import { WebPreviewCard } from "./WebPreviewCard";
 import { HitlFormCard, FormField } from "./HitlFormCard";
+import { useTraceStore } from "@/store/useTraceStore";
 import { formatDate } from "@/lib/utils";
 import { SANDBOX_BASE } from "@/lib/api";
 import { useSessionStore } from "@/store/useSessionStore";
@@ -473,6 +475,33 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
                       </motion.div>
                     )}
                   </AnimatePresence>
+                </div>
+              )}
+
+              {/* 单条回复执行历程 (Trace) 快捷入口 */}
+              {!isStreaming && (message.id || message.run_id || activeSessionId) && (
+                <div className="pt-2.5 mt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 text-slate-400 font-mono text-[11px]">
+                    <span className="flex items-center gap-1 text-slate-300">
+                      <Activity className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>历程追溯</span>
+                    </span>
+                    {formattedTime && (
+                      <span className="text-slate-500 hidden sm:inline">· {formattedTime}</span>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      const id = String(message.run_id || message.id || activeSessionId || "").replace(/^lc_run--/, "");
+                      useTraceStore.getState().openTrace(id);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 hover:text-indigo-200 border border-indigo-500/20 font-mono text-[11px] transition-all cursor-pointer shadow-sm hover:shadow"
+                  >
+                    <Activity className="w-3 h-3 text-indigo-400" />
+                    <span>查看甘特图 Trace</span>
+                    <span className="text-[10px] opacity-70">↗</span>
+                  </button>
                 </div>
               )}
             </div>

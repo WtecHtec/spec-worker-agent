@@ -237,3 +237,40 @@ class FileVersion:
     summary: Optional[str] = None
     created_at: Optional[datetime] = None
 
+
+@dataclass
+class TraceSpan:
+    id: str
+    trace_id: str
+    name: str
+    type: str  # node / llm / tool
+    status: str = "success"  # success / error
+    parent_span_id: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    duration_ms: int = 0
+    tokens: Optional[dict[str, Any]] = None
+    input_data: Optional[dict[str, Any]] = None
+    output_data: Optional[dict[str, Any]] = None
+    error_message: Optional[str] = None
+    reported_at: Optional[datetime] = None
+
+
+@dataclass
+class MessageTrace:
+    id: str
+    session_id: str
+    run_id: str
+    status: str = "success"
+    message_id: Optional[str] = None
+    total_duration_ms: int = 0
+    total_tokens: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    model_name: Optional[str] = None
+    tool_calls_count: int = 0
+    reported_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    spans: list[TraceSpan] = field(default_factory=list)
+
+

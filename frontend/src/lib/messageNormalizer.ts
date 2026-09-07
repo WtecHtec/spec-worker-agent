@@ -21,6 +21,7 @@ export interface NormalizedTurn {
   tool_calls?: any[];
   created_at?: string;
   rawMessages: any[];
+  run_id?: string;
 }
 
 /**
@@ -127,6 +128,17 @@ export function groupMessagesIntoTurns(rawMessages: any[]): NormalizedTurn[] {
         };
       }
       currentAgentTurn.rawMessages.push(msg);
+
+      // 提取本轮交互首个有效 run_id，作为整轮执行唯一的全局锚点
+      const extractedRunId =
+        msg.run_id ||
+        msg.metadata?.run_id ||
+        msg.response_metadata?.run_id ||
+        (typeof msg.id === "string" && msg.id.startsWith("lc_run--") ? msg.id.slice(8) : undefined);
+
+      if (extractedRunId && !currentAgentTurn.run_id) {
+        currentAgentTurn.run_id = extractedRunId;
+      }
 
       const text = extractMessageText(msg);
 

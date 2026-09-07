@@ -274,3 +274,69 @@ class FileVersionModel(Base):
     )
 
 
+# ─────────────────────────────────────────────────────────────
+# message_traces (单条消息回复/Run 级别 Trace 追踪总表)
+# ─────────────────────────────────────────────────────────────
+class MessageTraceModel(Base):
+    __tablename__ = "message_traces"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    session_id: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    message_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    run_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="success", nullable=False)  # success / error / cancelled
+    total_duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tool_calls_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    spans: Mapped[list["TraceSpanModel"]] = relationship(
+        back_populates="trace",
+        cascade="all, delete-orphan",
+        order_by="TraceSpanModel.start_time",
+    )
+
+    __table_args__ = (
+        Index("idx_message_traces_session_id", "session_id"),
+        Index("idx_message_traces_run_id", "run_id"),
+        Index("idx_message_traces_message_id", "message_id"),
+        Index("idx_message_traces_reported_at", "reported_at"),
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# trace_spans (执行步骤明细表，对应甘特图单步条形块)
+# ─────────────────────────────────────────────────────────────
+class TraceSpanModel(Base):
+    __tablename__ = "trace_spans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    trace_id: Mapped[str] = mapped_column(String(36), ForeignKey("message_traces.id", ondelete="CASCADE"), nullable=False)
+    parent_span_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)  # context_compressor, agent_node, tools_node, execute_bash 等
+    type: Mapped[str] = mapped_column(String(30), nullable=False)  # node / llm / tool
+    status: Mapped[str] = mapped_column(String(20), default="success", nullable=False)  # success / error
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    tokens: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    input_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    trace: Mapped["MessageTraceModel"] = relationship(back_populates="spans")
+
+    __table_args__ = (
+        Index("idx_trace_spans_trace_id", "trace_id"),
+        Index("idx_trace_spans_type", "type"),
+        Index("idx_trace_spans_start_time", "start_time"),
+    )
+
+
+

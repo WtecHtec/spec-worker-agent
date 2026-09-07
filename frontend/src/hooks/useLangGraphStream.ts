@@ -103,6 +103,16 @@ export function useLangGraphStream({
       onRunCreated?.(run.run_id);
     }, [onRunCreated]),
 
+    // 监听 LangGraph 派发的自定义生命周期事件（仅当历史对话超阈值触发压缩时生效）
+    onCustomEvent: useCallback((event: any) => {
+      const eventName = event?.name || event?.type || (typeof event === "string" ? event : "");
+      if (eventName === "memory_compression_started") {
+        setActiveNode("context_compressor");
+      } else if (eventName === "memory_compression_finished") {
+        setActiveNode(null);
+      }
+    }, []),
+
     // 每次 state chunk 更新时触发（对齐 LangGraph event: updates 协议：data 为 {"node_name": {...}}）
     onUpdateEvent: useCallback((data: any) => {
       let extracted: any[] = [];
@@ -110,11 +120,18 @@ export function useLangGraphStream({
         extracted = data.messages;
       } else if (data && typeof data === "object") {
         for (const key of Object.keys(data)) {
-          // 捕获活跃节点名称（如 context_compressor, agent_node, tools_node）
-          if (key && key !== "messages") {
-            setActiveNode(key);
-          }
           const val = data[key];
+          // 捕获活跃节点名称（如 agent_node, tools_node）
+          if (key && key !== "messages") {
+            if (key === "context_compressor") {
+              // 关键防护：只有当 context_compressor 真正产出了 summary 或游标，才显示记忆提炼；短路跳过返回 {} 时坚决不设
+              if (val && typeof val === "object" && (val.summary || val.active_cut_index)) {
+                setActiveNode("context_compressor");
+              }
+            } else {
+              setActiveNode(key);
+            }
+          }
           if (val && typeof val === "object" && Array.isArray(val.messages)) {
             extracted.push(...val.messages);
           }
@@ -158,6 +175,7 @@ export function useLangGraphStream({
    */
   const submit = useCallback(
     (text: string) => {
+      setActiveNode(null);
       const payload = {
         messages: [{ type: "human", content: text }],
       } as unknown as Partial<AgentState>;

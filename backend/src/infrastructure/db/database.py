@@ -9,6 +9,7 @@ engine = create_async_engine(
     max_overflow=settings.pg_max_overflow,
     pool_timeout=settings.pg_pool_timeout,
     echo=settings.app_env == "development",
+    connect_args={"server_settings": {"timezone": "Asia/Shanghai"}},
 )
 
 AsyncSessionLocal = async_sessionmaker(

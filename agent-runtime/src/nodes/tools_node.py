@@ -162,15 +162,21 @@ async def tools_node(state: AgentState, config: RunnableConfig | None = None):
 
         # 3. 常规分发执行
         print(f"[agent-runtime] Executing tool [{tool_name}] for user [{user_id}] with args: {tool_args}")
-        result = await registry.dispatch(tool_name, tool_args, ctx)
-        output_str = result.output if isinstance(result.output, str) else str(result.output)
-        
-        # 若是高危操作，在工具返回中显式包含人类授权审计留痕
-        if is_high_risk:
-            output_str = f"【HITL安全审计留痕: 人类已批准高危操作授权】\n- 授权事项: {hr_title}\n- 执行结果:\n{output_str}"
+        try:
+            result = await registry.dispatch(tool_name, tool_args, ctx)
+            output_str = result.output if isinstance(result.output, str) else str(result.output)
+            
+            # 若是高危操作，在工具返回中显式包含人类授权审计留痕
+            if is_high_risk:
+                output_str = f"【HITL安全审计留痕: 人类已批准高危操作授权】\n- 授权事项: {hr_title}\n- 执行结果:\n{output_str}"
 
-        tool_messages.append(
-            ToolMessage(content=output_str, tool_call_id=tool_id, name=tool_name)
-        )
+            tool_messages.append(
+                ToolMessage(content=output_str, tool_call_id=tool_id, name=tool_name)
+            )
+        except Exception as e:
+            err_str = f"Tool execution failed: {str(e)}"
+            tool_messages.append(
+                ToolMessage(content=err_str, tool_call_id=tool_id, name=tool_name)
+            )
 
     return {"messages": tool_messages}

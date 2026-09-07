@@ -7,8 +7,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.settings import get_settings
-from src.infrastructure.db.database import get_db, AsyncSessionLocal
-from src.infrastructure.db.repositories import SessionRepository, MessageRepository
+from src.infrastructure.db.database import get_db
+from src.infrastructure.db.repositories import SessionRepository
 from src.interface.middleware.auth import get_current_user_id
 from src.application.auth.internal_jwt import mint_internal_jwt
 
@@ -52,52 +52,6 @@ def extract_run_id_from_chunk(chunk_str: str) -> str | None:
     return None
 
 
-def extract_latest_ai_text_from_chunk(chunk_str: str) -> tuple[str | None, bool]:
-    """
-    尝试从 LangGraph event chunk 中提取最新生成的 AI 文本。
-    返回 (text, is_incremental):
-    - is_incremental=False: 代表该 text 是最新的完整文本快照（应覆盖更新，杜绝重复累加）
-    - is_incremental=True: 代表该 text 是增量 token（应累加追加）
-    """
-    for line in chunk_str.splitlines():
-        if line.startswith("data:"):
-            raw_data = line.removeprefix("data:").strip()
-            if not raw_data:
-                continue
-            try:
-                payload = json.loads(raw_data)
-                if isinstance(payload, dict):
-                    # 1. 顶层 messages（event: values）——只看最后一条真正由当前步骤生成的 AI 消息
-                    if "messages" in payload and isinstance(payload["messages"], list) and payload["messages"]:
-                        last_m = payload["messages"][-1]
-                        if isinstance(last_m, dict) and last_m.get("type") in ("AIMessageChunk", "ai", "assistant"):
-                            c = last_m.get("content", "")
-                            if isinstance(c, str) and c:
-                                return c, False
-
-                    # 2. event: updates 节点消息
-                    for node_val in payload.values():
-                        if isinstance(node_val, dict) and "messages" in node_val and isinstance(node_val["messages"], list) and node_val["messages"]:
-                            last_m = node_val["messages"][-1]
-                            if isinstance(last_m, dict) and last_m.get("type") in ("AIMessageChunk", "ai", "assistant"):
-                                c = last_m.get("content", "")
-                                if isinstance(c, str) and c:
-                                    return c, False
-
-                    # 3. 增量 content
-                    if "content" in payload and isinstance(payload["content"], str) and payload["content"]:
-                        return payload["content"], True
-            except Exception:
-                pass
-    return None, False
-
-
-# 保持兼容性别名
-def extract_content_from_chunk(chunk_str: str) -> str:
-    text, _ = extract_latest_ai_text_from_chunk(chunk_str)
-    return text or ""
-
-
 @router.post("/threads/{thread_id}/runs/stream")
 async def proxy_run_stream(
     thread_id: str,
@@ -106,12 +60,11 @@ async def proxy_run_stream(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    网关层流式代理：
+    流式执行 Run 代理端点：
     1. 校验用户对 thread_id 的所有权
     2. 签发短效内部 JWT
     3. 代理 upstream LangGraph Server 的流式输出并直推前端
     4. 监听前端断连触发后台真取消
-    5. 流式结束/取消时持久化业务库消息
     """
     await assert_thread_belongs_to_user(thread_id, user_id, db)
 
@@ -127,13 +80,6 @@ async def proxy_run_stream(
     if not assistant_id or assistant_id == "agent":
         real_assistant_id = await get_system_assistant_id(internal_token)
         body["assistant_id"] = real_assistant_id
-
-    # 确保 stream_mode 包含官方标准 messages 通道
-    stream_mode = body.get("stream_mode")
-    if isinstance(stream_mode, list):
-        if "messages-tuple" in stream_mode and "messages" not in stream_mode:
-            stream_mode.append("messages")
-        body["stream_mode"] = stream_mode
 
     run_id_state = {"run_id": None, "is_cancelled": False}
 
@@ -162,10 +108,7 @@ async def proxy_run_stream(
                         if found_run_id:
                             run_id_state["run_id"] = found_run_id
 
-                    if "event: messages-tuple" in chunk_str and "event: messages\n" not in chunk_str:
-                        yield chunk_str.replace("event: messages-tuple", "event: messages").encode("utf-8")
-                    else:
-                        yield chunk
+                    yield chunk
 
                     # 检测客户端是否已主动断开
                     if await request.is_disconnected():
@@ -248,10 +191,10 @@ async def _proxy_get(path: str, user_id: str, query_params: str = "") -> dict:
 
 _cached_assistant_id: str | None = None
 
-async def get_system_assistant_id(token: str) -> str:
-    """自动获取系统注册的 agent assistant UUID，带缓存"""
+async def get_system_assistant_id(token: str, force_refresh: bool = False) -> str:
+    """自动获取系统注册的 agent assistant UUID，带缓存与强刷机制"""
     global _cached_assistant_id
-    if _cached_assistant_id:
+    if _cached_assistant_id and not force_refresh:
         return _cached_assistant_id
     client = get_proxy_http_client()
     url = f"{settings.langgraph_upstream_url.rstrip('/')}/assistants/search"

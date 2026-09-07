@@ -34,5 +34,9 @@ builder.add_conditional_edges(
 )
 builder.add_edge("tools_node", "agent_node")
 
-# 4. 编译图
-graph = builder.compile()
+from src.tracing.callback import TurnTraceCallbackHandler
+
+# 4. 编译图并接入标准生命周期回调（Trace 日志与甘特图上报）
+graph = builder.compile().with_config({
+    "callbacks": [TurnTraceCallbackHandler()],
+})

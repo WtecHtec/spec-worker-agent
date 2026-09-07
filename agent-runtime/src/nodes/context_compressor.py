@@ -244,7 +244,7 @@ async def context_compressor_node(
     if not slice_to_compress:
         return {}
 
-    # 4. 执行增量总结
+    # 4. 执行增量总结（真正跨过阈值并定位安全截断点后触发）
     existing_summary = state.get("summary", "")
     new_slice_text = format_messages_for_summary(slice_to_compress)
 
@@ -259,6 +259,17 @@ async def context_compressor_node(
         HumanMessage(content=user_prompt_content),
     ]
 
+    # 派发自定义流式事件，通知前端仅在达到阈值时展示“历史对话较长，正在提炼中期结构化记忆...”
+    try:
+        from langchain_core.callbacks.manager import adispatch_custom_event
+        await adispatch_custom_event(
+            "memory_compression_started",
+            {"total_tokens": total_tokens, "threshold": token_threshold},
+            config=config,
+        )
+    except Exception as e:
+        logger.debug("[context_compressor] adispatch_custom_event start ignored: %s", str(e))
+
     try:
         response = await summary_llm.ainvoke(prompt_messages, config=config)
         new_summary = response.content if isinstance(response.content, str) else str(response.content)
@@ -269,6 +280,17 @@ async def context_compressor_node(
             safe_cut_index,
             safe_cut_index + 1,
         )
+
+        try:
+            from langchain_core.callbacks.manager import adispatch_custom_event
+            await adispatch_custom_event(
+                "memory_compression_finished",
+                {"status": "completed", "active_cut_index": safe_cut_index + 1},
+                config=config,
+            )
+        except Exception:
+            pass
+
         # 仅返回更新后的 summary 与切分游标，保证 messages 键绝不被触碰
         return {
             "summary": new_summary,

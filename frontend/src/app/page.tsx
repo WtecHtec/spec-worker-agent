@@ -8,6 +8,7 @@ import { AuthModal } from "@/components/auth/AuthModal";
 import { ToastContainer } from "@/components/ui/ToastContainer";
 import { FileListDrawer } from "@/components/files/FileListDrawer";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
+import { TraceDrawer } from "@/components/chat/TraceDrawer";
 import { WebPreviewPanel } from "@/components/chat/WebPreviewPanel";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useSessionStore } from "@/store/useSessionStore";
@@ -50,6 +51,7 @@ export default function Home() {
       <ToastContainer />
       <FileListDrawer />
       <FilePreviewModal />
+      <TraceDrawer />
 
       {/* 侧边栏 */}
       <Sidebar />
