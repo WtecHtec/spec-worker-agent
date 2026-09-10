@@ -5,10 +5,7 @@ from jose import jwt
 
 from src.config.settings import get_settings
 from src.application.auth.internal_jwt import mint_internal_jwt
-from src.interface.routers.langgraph_proxy import (
-    extract_run_id_from_chunk,
-    extract_content_from_chunk,
-)
+from src.interface.routers.langgraph_proxy import extract_run_id_from_chunk
 
 settings = get_settings()
 
@@ -34,19 +31,6 @@ def test_extract_run_id_from_chunk():
     assert extract_run_id_from_chunk(no_run_chunk) is None
 
 
-def test_extract_content_from_chunk():
-    """测试从事件流 chunk 中提取 AI 文本"""
-    # 模拟 AIMessageChunk
-    chunk_msg = 'data: {"messages": [{"type": "AIMessageChunk", "content": "Hello World"}]}\n\n'
-    content = extract_content_from_chunk(chunk_msg)
-    assert content == "Hello World"
-
-    # 模拟 partial content
-    chunk_direct = 'data: {"content": " direct stream"}\n\n'
-    content2 = extract_content_from_chunk(chunk_direct)
-    assert content2 == " direct stream"
-
-
 @pytest.mark.asyncio
 async def test_langgraph_proxy_auth_rejection():
     """测试未经认证访问代理接口被拒绝 401"""
@@ -70,3 +54,29 @@ async def test_langgraph_proxy_cancel_auth_rejection():
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post("/threads/test-thread/runs/test-run/cancel")
         assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_langgraph_proxy_join_stream_auth_rejection():
+    """测试未经认证访问 joinStream 端点被拒绝 401"""
+    from httpx import AsyncClient, ASGITransport
+    from api_main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/threads/test-thread/runs/test-run/stream")
+        assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_langgraph_proxy_get_thread_and_runs_auth_rejection():
+    """测试未经认证访问 thread 和 runs 查询端点被拒绝 401"""
+    from httpx import AsyncClient, ASGITransport
+    from api_main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp1 = await client.get("/threads/test-thread")
+        assert resp1.status_code == 401
+        resp2 = await client.get("/threads/test-thread/runs")
+        assert resp2.status_code == 401

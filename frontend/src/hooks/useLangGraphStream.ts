@@ -9,7 +9,7 @@
  * - cancel() 同时调用 stream.stop()（停止前端渲染）+ 网关真实 Cancel 接口
  */
 
-import { useMemo, useRef, useCallback, useState } from "react";
+import { useMemo, useRef, useCallback, useState, useEffect } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { Client, type ThreadState } from "@langchain/langgraph-sdk";
 import { API_BASE } from "@/lib/api";
@@ -49,7 +49,8 @@ export function useLangGraphStream({
 }: UseLangGraphStreamOptions) {
   const activeRunIdRef = useRef<string | null>(null);
   const [activeNode, setActiveNode] = useState<string | null>(null);
-
+  const [isThreadBusy, setIsThreadBusy] = useState<boolean>(false);
+  const joiningRunIdRef = useRef<string | null>(null);
 
   const authHeaders: Record<string, string> = useMemo(() => {
     const headers: Record<string, string> = {};
@@ -97,9 +98,12 @@ export function useLangGraphStream({
     assistantId: "agent",           // 与 langgraph.json graph key 对应
     threadId: threadId ?? undefined,
     defaultHeaders: authHeaders,
+    reconnectOnMount: true,         // 开启官方 SDK 页面刷新/重连断点续传
+    fetchStateHistory: { limit: 15 }, // 载入历史记录，确保恢复连接时初始状态完备
 
     onCreated: useCallback((run: { run_id: string }) => {
       activeRunIdRef.current = run.run_id;
+      setIsThreadBusy(true);
       onRunCreated?.(run.run_id);
     }, [onRunCreated]),
 
@@ -157,17 +161,91 @@ export function useLangGraphStream({
       }
       onFinish?.(extracted);
       activeRunIdRef.current = null;
+      joiningRunIdRef.current = null;
+      setIsThreadBusy(false);
       setActiveNode(null);
     }, [onFinish]),
 
     onError: useCallback((err: unknown) => {
       const error = err instanceof Error ? err : new Error(String(err));
+      // 防御性清理当前失效/已不存在的 run 标记，避免页面持续抛错重试
+      if (typeof window !== "undefined" && threadId) {
+        try {
+          window.sessionStorage.removeItem(`lg:stream:${threadId}`);
+        } catch {
+          // ignore
+        }
+      }
       onError?.(error);
       activeRunIdRef.current = null;
+      joiningRunIdRef.current = null;
+      setIsThreadBusy(false);
       setActiveNode(null);
-    }, [onError]),
+    }, [onError, threadId]),
   });
 
+  const streamRef = useRef(stream);
+  streamRef.current = stream;
+  const lastCheckedThreadIdRef = useRef<string | null>(null);
+
+  // 主动探查服务端权威线程运行状态（仅在会话挂载或切换时执行一次，防并发保护与接力续流）
+  useEffect(() => {
+    if (!threadId || !token) {
+      setIsThreadBusy(false);
+      lastCheckedThreadIdRef.current = null;
+      return;
+    }
+
+    // 同一会话若已探查过，不再重复请求
+    if (lastCheckedThreadIdRef.current === threadId) {
+      return;
+    }
+
+    const currentThreadId = threadId;
+    let isMounted = true;
+
+    async function checkThreadAndRuns() {
+      // 若当前本地流式 Hook 已经在推流运行中，无需额外请求 runs.list
+      if (streamRef.current.isLoading) {
+        lastCheckedThreadIdRef.current = currentThreadId;
+        return;
+      }
+
+      try {
+        const runs = await client.runs.list(currentThreadId, { limit: 5 });
+        if (!isMounted) return;
+
+        lastCheckedThreadIdRef.current = currentThreadId;
+
+        const activeRun = runs.find((r) => r.status === "running" || r.status === "pending");
+        if (activeRun) {
+          activeRunIdRef.current = activeRun.run_id;
+          setIsThreadBusy(true);
+
+          // 若当前流式 Hook 未在推流状态且尚未针对该 run_id 发起过续流，主动接力续流！
+          if (!streamRef.current.isLoading && joiningRunIdRef.current !== activeRun.run_id) {
+            joiningRunIdRef.current = activeRun.run_id;
+            try {
+              await streamRef.current.joinStream(activeRun.run_id);
+            } catch (joinErr) {
+              console.warn("[useLangGraphStream] joinStream failed:", joinErr);
+            }
+          }
+        } else {
+          setIsThreadBusy(false);
+          joiningRunIdRef.current = null;
+        }
+      } catch (err) {
+        console.warn("[useLangGraphStream] checkThreadAndRuns error:", err);
+      }
+    }
+
+    void checkThreadAndRuns();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [client, threadId, token]);
 
   /**
    * 发送用户消息（触发新一轮 LLM 推理）
@@ -176,6 +254,7 @@ export function useLangGraphStream({
   const submit = useCallback(
     (text: string) => {
       setActiveNode(null);
+      setIsThreadBusy(true);
       const payload = {
         messages: [{ type: "human", content: text }],
       } as unknown as Partial<AgentState>;
@@ -191,8 +270,28 @@ export function useLangGraphStream({
    */
   const cancel = useCallback(async () => {
     stream.stop();
+    setIsThreadBusy(false);
+    joiningRunIdRef.current = null;
 
-    const runId = activeRunIdRef.current;
+    let runId = activeRunIdRef.current;
+    if (!runId && typeof window !== "undefined" && threadId) {
+      runId = window.sessionStorage.getItem(`lg:stream:${threadId}`);
+    }
+
+    // 若本地尚无 runId，尝试直接向服务端查询最新活跃 Run
+    if (!runId && threadId) {
+      const currentThreadId = threadId;
+      try {
+        const runs = await client.runs.list(currentThreadId, { limit: 1 });
+        const runningRun = runs.find((r) => r.status === "running" || r.status === "pending");
+        if (runningRun) {
+          runId = runningRun.run_id;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     if (threadId && runId) {
       try {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -207,7 +306,7 @@ export function useLangGraphStream({
     }
     activeRunIdRef.current = null;
     setActiveNode(null);
-  }, [stream, threadId, token]);
+  }, [client, stream, threadId, token]);
 
   /**
    * 响应并恢复 HITL 中断（传递人类审批/表单填写决策）
@@ -230,9 +329,13 @@ export function useLangGraphStream({
     ? interruptData.action_requests
     : [];
 
+  const isBusy = stream.isLoading || isThreadBusy;
+
   return {
-    /** 当前 LLM 推理是否正在进行 */
-    isLoading: stream.isLoading,
+    /** 当前 LLM 推理是否正在进行（结合 SDK 流式态与服务端权威运行态） */
+    isLoading: isBusy,
+    isBusy,
+    isThreadBusy,
     /** 当前活跃执行的 LangGraph 节点名称（如 context_compressor, agent_node, tools_node） */
     activeNode,
     /** 当前流式消息列表（由 SDK 内部自动合并维护） */

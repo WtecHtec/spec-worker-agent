@@ -25,9 +25,33 @@ interface SessionState {
   updateMessageByTaskId: (taskId: string, updates: Partial<Message>) => void;
 }
 
+const CURRENT_SESSION_KEY = "current_session_id";
+
+function getStoredSessionId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(CURRENT_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredSessionId(id: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (id) {
+      localStorage.setItem(CURRENT_SESSION_KEY, id);
+    } else {
+      localStorage.removeItem(CURRENT_SESSION_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
-  currentSessionId: null,
+  currentSessionId: getStoredSessionId(),
   currentRunId: null,
   messages: [],
   isLoadingSessions: false,
@@ -42,9 +66,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const data = await api.getSessions(token);
       set({ sessions: data, isLoadingSessions: false });
-      // 如果没有选中的会话，默认选第一个
-      if (data.length > 0 && !get().currentSessionId) {
-        get().selectSession(data[0].id, token);
+
+      const current = get().currentSessionId;
+      if (data.length > 0) {
+        if (!current || !data.some((s: Session) => s.id === current)) {
+          get().selectSession(data[0].id, token);
+        }
+      } else {
+        set({ currentSessionId: null });
+        setStoredSessionId(null);
       }
     } catch (err: any) {
       set({ isLoadingSessions: false, error: err.message });
@@ -54,6 +84,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   createSession: async (token: string, title?: string) => {
     const defaultTitle = title || `会话 ${new Date().toLocaleDateString()}`;
     const newSession = await api.createSession(defaultTitle, token);
+    setStoredSessionId(newSession.id);
     set((state) => ({
       sessions: [newSession, ...state.sessions],
       currentSessionId: newSession.id,
@@ -67,6 +98,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const remaining = get().sessions.filter((s) => s.id !== sessionId);
     const isCurrent = get().currentSessionId === sessionId;
     const nextSessionId = isCurrent ? (remaining[0]?.id || null) : get().currentSessionId;
+    setStoredSessionId(nextSessionId);
     
     set({
       sessions: remaining,
@@ -80,6 +112,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   selectSession: async (sessionId: string, _token?: string) => {
+    setStoredSessionId(sessionId);
     set({ currentSessionId: sessionId });
   },
 

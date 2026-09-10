@@ -64,7 +64,8 @@ async def proxy_run_stream(
     1. 校验用户对 thread_id 的所有权
     2. 签发短效内部 JWT
     3. 代理 upstream LangGraph Server 的流式输出并直推前端
-    4. 监听前端断连触发后台真取消
+    4. 透传 Content-Location 响应头以供客户端识别 run_id
+    5. 客户端刷新断连时不误杀后台 Agent
     """
     await assert_thread_belongs_to_user(thread_id, user_id, db)
 
@@ -81,56 +82,66 @@ async def proxy_run_stream(
         real_assistant_id = await get_system_assistant_id(internal_token)
         body["assistant_id"] = real_assistant_id
 
-    run_id_state = {"run_id": None, "is_cancelled": False}
+    upstream_url = f"{settings.langgraph_upstream_url.rstrip('/')}/threads/{thread_id}/runs/stream"
+    headers = {
+        "Authorization": f"Bearer {internal_token}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
 
-    async def event_generator():
-        upstream_url = f"{settings.langgraph_upstream_url.rstrip('/')}/threads/{thread_id}/runs/stream"
-        headers = {
-            "Authorization": f"Bearer {internal_token}",
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-        }
+    try:
+        req = client.build_request("POST", upstream_url, json=body, headers=headers)
+        upstream_resp = await client.send(req, stream=True)
 
-        try:
-            async with client.stream("POST", upstream_url, json=body, headers=headers) as resp:
-                if resp.status_code >= 400:
-                    error_detail = await resp.aread()
-                    logger.error("upstream_stream_failed", status=resp.status_code, detail=error_detail.decode())
-                    yield f"event: error\ndata: {json.dumps({'error': 'Upstream error', 'status': resp.status_code})}\n\n".encode()
-                    return
+        if upstream_resp.status_code >= 400:
+            error_detail = await upstream_resp.aread()
+            await upstream_resp.aclose()
+            logger.error("upstream_stream_failed", status=upstream_resp.status_code, detail=error_detail.decode())
+            return StreamingResponse(
+                iter([f"event: error\ndata: {json.dumps({'error': 'Upstream error', 'status': upstream_resp.status_code})}\n\n".encode()]),
+                media_type="text/event-stream",
+                status_code=upstream_resp.status_code,
+            )
 
-                async for chunk in resp.aiter_bytes():
-                    chunk_str = chunk.decode("utf-8", errors="ignore")
-                    
-                    # 抓取 run_id
-                    if not run_id_state["run_id"]:
-                        found_run_id = extract_run_id_from_chunk(chunk_str)
-                        if found_run_id:
-                            run_id_state["run_id"] = found_run_id
-
-                    yield chunk
-
-                    # 检测客户端是否已主动断开
-                    if await request.is_disconnected():
-                        logger.info("client_disconnected_trigger_cancel", thread_id=thread_id, run_id=run_id_state["run_id"])
-                        run_id_state["is_cancelled"] = True
-                        if run_id_state["run_id"]:
-                            await cancel_upstream_run(thread_id, run_id_state["run_id"], internal_token)
-                        break
-
-        except httpx.RequestError as exc:
-            logger.error("langgraph_proxy_request_error", error=str(exc))
-            yield f"event: error\ndata: {json.dumps({'error': 'LangGraph Server connection failed'})}\n\n".encode()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
+        response_headers = {
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        },
-    )
+        }
+        # 核心：必须透传 Content-Location 与 Location 给前端 SDK
+        content_location = upstream_resp.headers.get("content-location")
+        location = upstream_resp.headers.get("location")
+        if content_location:
+            response_headers["Content-Location"] = content_location
+        if location:
+            response_headers["Location"] = location
+
+        async def event_generator():
+            try:
+                async for chunk in upstream_resp.aiter_bytes():
+                    yield chunk
+
+                    # 检测客户端是否已主动断开（如刷新页面），仅停止向当前 HTTP 连接写数据，不杀后台 Agent
+                    if await request.is_disconnected():
+                        logger.info("client_disconnected_stop_streaming", thread_id=thread_id)
+                        break
+            except Exception as exc:
+                logger.error("langgraph_proxy_stream_error", error=str(exc))
+            finally:
+                await upstream_resp.aclose()
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers=response_headers,
+        )
+
+    except httpx.RequestError as exc:
+        logger.error("langgraph_proxy_request_error", error=str(exc))
+        return StreamingResponse(
+            iter([f"event: error\ndata: {json.dumps({'error': 'LangGraph Server connection failed'})}\n\n".encode()]),
+            media_type="text/event-stream",
+        )
 
 
 async def cancel_upstream_run(thread_id: str, run_id: str, token: str):
@@ -164,6 +175,153 @@ async def proxy_cancel_run(
     await cancel_upstream_run(thread_id, run_id, internal_token)
     
     return {"status": "cancelled", "run_id": run_id, "thread_id": thread_id}
+
+
+@router.get("/threads/{thread_id}/runs/{run_id}/stream")
+async def proxy_join_run_stream(
+    thread_id: str,
+    run_id: str,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    代理 LangGraph joinStream：页面刷新或网络重连时断点接力
+    1. 校验用户对 thread_id 的所有权
+    2. 签发短效内部 JWT
+    3. 透传 Last-Event-ID 请求头与 query_params（补全 stream_mode 保证下发 Token）
+    4. 代理 upstream LangGraph Server 的流式输出并直推前端
+    """
+    await assert_thread_belongs_to_user(thread_id, user_id, db)
+
+    internal_token = mint_internal_jwt(user_id=user_id, ttl_seconds=60)
+    client = get_proxy_http_client()
+
+    upstream_url = f"{settings.langgraph_upstream_url.rstrip('/')}/threads/{thread_id}/runs/{run_id}/stream"
+    headers = {
+        "Authorization": f"Bearer {internal_token}",
+        "Accept": "text/event-stream",
+    }
+    last_event_id = request.headers.get("Last-Event-ID")
+    if last_event_id:
+        headers["Last-Event-ID"] = last_event_id
+
+    params = dict(request.query_params)
+    if "stream_mode" not in params:
+        params["stream_mode"] = '["messages-tuple","values","updates"]'
+
+    try:
+        req = client.build_request("GET", upstream_url, headers=headers, params=params)
+        upstream_resp = await client.send(req, stream=True)
+
+        if upstream_resp.status_code >= 400:
+            error_detail = await upstream_resp.aread()
+            await upstream_resp.aclose()
+            logger.error("upstream_join_stream_failed", status=upstream_resp.status_code, detail=error_detail.decode())
+            return StreamingResponse(
+                iter([f"event: error\ndata: {json.dumps({'error': 'Upstream error', 'status': upstream_resp.status_code})}\n\n".encode()]),
+                media_type="text/event-stream",
+                status_code=upstream_resp.status_code,
+            )
+
+        response_headers = {
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+        content_location = upstream_resp.headers.get("content-location")
+        location = upstream_resp.headers.get("location")
+        if content_location:
+            response_headers["Content-Location"] = content_location
+        if location:
+            response_headers["Location"] = location
+
+        async def event_generator():
+            try:
+                async for chunk in upstream_resp.aiter_bytes():
+                    yield chunk
+
+                    if await request.is_disconnected():
+                        logger.info("client_disconnected_stop_join_streaming", thread_id=thread_id, run_id=run_id)
+                        break
+            except Exception as exc:
+                logger.error("langgraph_proxy_join_stream_error", error=str(exc))
+            finally:
+                await upstream_resp.aclose()
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers=response_headers,
+        )
+
+    except httpx.RequestError as exc:
+        logger.error("langgraph_proxy_join_request_error", error=str(exc))
+        return StreamingResponse(
+            iter([f"event: error\ndata: {json.dumps({'error': 'LangGraph Server connection failed'})}\n\n".encode()]),
+            media_type="text/event-stream",
+        )
+
+
+@router.get("/threads/{thread_id}")
+async def proxy_get_thread(
+    thread_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取 Thread 详细元信息（包含权威 status: idle / busy / interrupted 等）：
+    供前端在页面刷新或会话切换时，主动探查当前线程是否仍在执行后台任务
+    """
+    await assert_thread_belongs_to_user(thread_id, user_id, db)
+    await _ensure_thread_in_upstream(thread_id, user_id)
+
+    client = get_proxy_http_client()
+    internal_token = mint_internal_jwt(user_id=user_id, ttl_seconds=60)
+    url = f"{settings.langgraph_upstream_url.rstrip('/')}/threads/{thread_id}"
+    headers = {"Authorization": f"Bearer {internal_token}", "Accept": "application/json"}
+
+    try:
+        resp = await client.get(url, headers=headers)
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("langgraph_proxy_get_thread_error", thread_id=thread_id, error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to query thread from LangGraph")
+
+
+@router.get("/threads/{thread_id}/runs")
+async def proxy_list_runs(
+    thread_id: str,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    获取 Thread 下的 Runs 列表（包含各 run 的 status、run_id 等）：
+    供前端查询是否有 status 为 running / pending 的活跃 Run
+    """
+    await assert_thread_belongs_to_user(thread_id, user_id, db)
+    await _ensure_thread_in_upstream(thread_id, user_id)
+
+    client = get_proxy_http_client()
+    internal_token = mint_internal_jwt(user_id=user_id, ttl_seconds=60)
+    url = f"{settings.langgraph_upstream_url.rstrip('/')}/threads/{thread_id}/runs"
+    headers = {"Authorization": f"Bearer {internal_token}", "Accept": "application/json"}
+
+    try:
+        resp = await client.get(url, headers=headers, params=dict(request.query_params))
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("langgraph_proxy_list_runs_error", thread_id=thread_id, error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to query runs from LangGraph")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

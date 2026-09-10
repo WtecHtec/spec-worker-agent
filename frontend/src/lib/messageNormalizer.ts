@@ -196,16 +196,42 @@ export function splitCompletedAndActive(
 ): { completedTurns: NormalizedTurn[]; activeTurn: NormalizedTurn | null } {
   const allTurns = groupMessagesIntoTurns(rawMessages);
   if (allTurns.length === 0) {
+    if (isStreaming) {
+      return {
+        completedTurns: [],
+        activeTurn: {
+          id: "active-agent-placeholder",
+          role: "agent",
+          content: "",
+          steps: [],
+          rawMessages: [],
+        },
+      };
+    }
     return { completedTurns: [], activeTurn: null };
   }
 
-  // 仅在正在处于流式态且末尾为 Agent 回答时，将其隔离为 activeTurn
+  // 处于流式态时的动静分离处理
   const lastTurn = allTurns[allTurns.length - 1];
-  if (isStreaming && lastTurn.role === "agent") {
-    return {
-      completedTurns: allTurns.slice(0, -1),
-      activeTurn: lastTurn,
-    };
+  if (isStreaming) {
+    if (lastTurn.role === "agent") {
+      return {
+        completedTurns: allTurns.slice(0, -1),
+        activeTurn: lastTurn,
+      };
+    } else {
+      // 正在流式生成但首个 AI Token 尚未产出（如刚刷新页面重新连入），占位活跃 Agent 轮次以立即激活流式打字与执行节点状态
+      return {
+        completedTurns: allTurns,
+        activeTurn: {
+          id: `active-agent-placeholder-${lastTurn.id}`,
+          role: "agent",
+          content: "",
+          steps: [],
+          rawMessages: [],
+        },
+      };
+    }
   }
 
   return {
