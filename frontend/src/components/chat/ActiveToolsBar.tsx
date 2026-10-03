@@ -15,8 +15,7 @@ interface ActiveToolsResponse {
   total_count: number;
   tools: ToolItem[];
 }
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE } from "@/lib/api";
 
 const categoryStyles: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   builtin: { label: "内置", color: "bg-blue-500/10 text-blue-400 border-blue-500/20", icon: <Sparkles className="w-3 h-3 mr-1" /> },

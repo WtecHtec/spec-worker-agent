@@ -63,9 +63,10 @@ export const useFileStore = create<FileState>((set, get) => ({
     set({ isLoading: true });
     try {
       const res = await api.getSessionFiles(sessionId, token, currentCat);
-      set({ files: res.items || [], total: res.total || 0 });
+      set({ files: res?.items || [], total: res?.total || 0 });
     } catch (error) {
-      console.error("Failed to fetch session files:", error);
+      console.warn("Failed to fetch session files:", error);
+      set({ files: [], total: 0 });
     } finally {
       set({ isLoading: false });
     }

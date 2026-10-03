@@ -15,7 +15,7 @@ logger = logging.getLogger("langgraph_checkpointer")
 
 @asynccontextmanager
 async def get_checkpointer():
-    postgres_uri = os.getenv("POSTGRES_URI", "").strip()
+    postgres_uri = os.getenv("DATABASE_URL", "").strip()
 
     if postgres_uri.startswith("postgres"):
         logger.info("Connecting to PostgreSQL checkpointer: %s", postgres_uri.split("@")[-1])

@@ -1,5 +1,13 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-export const SANDBOX_BASE = process.env.NEXT_PUBLIC_SANDBOX_URL || "http://localhost:5050";
+export const API_BASE = (
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  "http://localhost:8000"
+).replace(/\/+$/, "");
+
+export const SANDBOX_BASE = (
+  process.env.NEXT_PUBLIC_SANDBOX_URL ||
+  "http://localhost:5050"
+).replace(/\/+$/, "");
 
 interface RequestOptions extends RequestInit {
   token?: string | null;
@@ -33,12 +41,23 @@ export async function apiRequest<T = any>(
     requestHeaders["Authorization"] = `Bearer ${token}`;
   }
 
-  const url = endpoint.startsWith("http") ? endpoint : `${API_BASE}${endpoint}`;
+  const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const url = endpoint.startsWith("http") ? endpoint : `${API_BASE}${cleanEndpoint}`;
 
-  const response = await fetch(url, {
-    headers: requestHeaders,
-    ...rest,
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: requestHeaders,
+      ...rest,
+    });
+  } catch (err: any) {
+    throw new ApiError(
+      err?.message || `网络连接失败，无法连接到后端服务 (${API_BASE})`,
+      "NETWORK_ERROR",
+      0,
+      { originalError: err }
+    );
+  }
 
   if (response.status === 204) {
     return null as T;
